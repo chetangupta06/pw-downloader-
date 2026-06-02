@@ -3,10 +3,9 @@ FROM node:20-bullseye
 # Install FFmpeg for remuxing
 RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
 
-# Set working directory and create user for Hugging Face (UID 1000)
-RUN useradd -m -u 1000 user
+# Set working directory and use the built-in 'node' user (UID 1000)
 WORKDIR /app
-RUN chown -R user:user /app
+RUN chown -R node:node /app
 
 # Install backend dependencies
 COPY backend/package*.json ./backend/
@@ -28,7 +27,7 @@ EXPOSE 7860
 ENV PORT=7860
 
 # Switch to non-root user
-USER user
+USER node
 
 # Start the Node backend
 CMD ["node", "backend/server.js"]
