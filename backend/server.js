@@ -270,39 +270,38 @@ async function processDownload(sessionId, m3u8Url) {
      
      const outputPath = path.join(OUT_DIR, `${sessionId}.mp4`);
      
-     return new Promise((resolve, reject) => {
-       try {
-         const finalStream = fs.createWriteStream(outputPath);
-         
-         const initPath = path.join(sessionDir, `seg_init.mp4`);
-         if (fs.existsSync(initPath)) {
-             const initData = fs.readFileSync(initPath);
-             finalStream.write(initData);
-         }
-         
-         for (let j = startNum; j < i; j++) {
-            const segmentPath = path.join(sessionDir, `seg_${j}.mp4`);
-            if (fs.existsSync(segmentPath)) {
-               const data = fs.readFileSync(segmentPath);
-               finalStream.write(data);
-            }
-         }
-         finalStream.end();
-         
-         finalStream.on('finish', () => {
-             log(session, 'Merge completed successfully.');
-             sendEvent(session, 'complete', { fileUrl: `/api/download_file?sessionId=${sessionId}` });
-             fs.rmSync(sessionDir, { recursive: true, force: true });
-             resolve();
-         });
-         
-         finalStream.on('error', (err) => {
-             reject(err);
-         });
-       } catch (err) {
-         reject(err);
+     try {
+       const finalStream = fs.createWriteStream(outputPath);
+       
+       const initPath = path.join(sessionDir, `seg_init.mp4`);
+       if (fs.existsSync(initPath)) {
+           const initData = await fs.promises.readFile(initPath);
+           const canWrite = finalStream.write(initData);
+           if (!canWrite) await new Promise(r => finalStream.once('drain', r));
        }
-     });
+       
+       for (let j = startNum; j < i; j++) {
+          const segmentPath = path.join(sessionDir, `seg_${j}.mp4`);
+          if (fs.existsSync(segmentPath)) {
+             const data = await fs.promises.readFile(segmentPath);
+             const canWrite = finalStream.write(data);
+             if (!canWrite) await new Promise(r => finalStream.once('drain', r));
+          }
+       }
+       finalStream.end();
+       
+       await new Promise((resolve, reject) => {
+           finalStream.on('finish', resolve);
+           finalStream.on('error', reject);
+       });
+       
+       log(session, 'Merge completed successfully.');
+       sendEvent(session, 'complete', { fileUrl: `/api/download_file?sessionId=${sessionId}` });
+       fs.rmSync(sessionDir, { recursive: true, force: true });
+     } catch (err) {
+       throw new Error(`Merge failed: ${err.message}`);
+     }
+     return;
   }
 
   // Fallback to standard M3U8 process
@@ -468,55 +467,55 @@ async function processDownload(sessionId, m3u8Url) {
   const outputPath = path.join(OUT_DIR, `${sessionId}.ts`);
   const outputMp4Path = path.join(OUT_DIR, `${sessionId}.mp4`);
   
-  return new Promise((resolve, reject) => {
-    try {
-      const finalStream = fs.createWriteStream(outputPath);
-      for (let j = 0; j < totalSegments; j++) {
-         const segmentPath = path.join(sessionDir, `seg_${j}.ts`);
-         if (fs.existsSync(segmentPath)) {
-             const data = fs.readFileSync(segmentPath);
-             finalStream.write(data);
-         }
-      }
-      finalStream.end();
-      
-      finalStream.on('finish', () => {
-          log(session, 'TS Merge completed. Remuxing to MP4 (Zero quality loss)...');
-          
-          const ffmpeg = spawn('ffmpeg', ['-i', outputPath, '-c', 'copy', outputMp4Path]);
-          
-          ffmpeg.on('close', (code) => {
-              if (code === 0) {
-                  log(session, 'MP4 Remux successful! Ready to save.');
-                  sendEvent(session, 'complete', { fileUrl: `/api/download_file?sessionId=${sessionId}&format=mp4` });
-                  try {
-                      fs.unlinkSync(outputPath);
-                      fs.rmSync(sessionDir, { recursive: true, force: true });
-                  } catch (e) {}
-                  resolve();
-              } else {
-                  log(session, 'MP4 Remux failed. Serving TS instead.');
-                  sendEvent(session, 'complete', { fileUrl: `/api/download_file?sessionId=${sessionId}&format=ts` });
-                  try { fs.rmSync(sessionDir, { recursive: true, force: true }); } catch (e) {}
-                  resolve();
-              }
-          });
-          
-          ffmpeg.on('error', (err) => {
-              log(session, `FFmpeg error: ${err.message}`);
-              sendEvent(session, 'complete', { fileUrl: `/api/download_file?sessionId=${sessionId}&format=ts` });
-              try { fs.rmSync(sessionDir, { recursive: true, force: true }); } catch (e) {}
-              resolve();
-          });
-      });
-      
-      finalStream.on('error', (err) => {
-          reject(err);
-      });
-    } catch (e) {
-      reject(e);
+  try {
+    const finalStream = fs.createWriteStream(outputPath);
+    for (let j = 0; j < totalSegments; j++) {
+       const segmentPath = path.join(sessionDir, `seg_${j}.ts`);
+       if (fs.existsSync(segmentPath)) {
+           const data = await fs.promises.readFile(segmentPath);
+           const canWrite = finalStream.write(data);
+           if (!canWrite) await new Promise(r => finalStream.once('drain', r));
+       }
     }
-  });
+    finalStream.end();
+    
+    await new Promise((resolve, reject) => {
+        finalStream.on('finish', resolve);
+        finalStream.on('error', reject);
+    });
+    
+    log(session, 'TS Merge completed. Remuxing to MP4 (Zero quality loss)...');
+    
+    await new Promise((resolve) => {
+        const ffmpeg = spawn('ffmpeg', ['-i', outputPath, '-c', 'copy', outputMp4Path]);
+        
+        ffmpeg.on('close', (code) => {
+            if (code === 0) {
+                log(session, 'MP4 Remux successful! Ready to save.');
+                sendEvent(session, 'complete', { fileUrl: `/api/download_file?sessionId=${sessionId}&format=mp4` });
+                try {
+                    fs.unlinkSync(outputPath);
+                    fs.rmSync(sessionDir, { recursive: true, force: true });
+                } catch (e) {}
+                resolve();
+            } else {
+                log(session, 'MP4 Remux failed. Serving TS instead.');
+                sendEvent(session, 'complete', { fileUrl: `/api/download_file?sessionId=${sessionId}&format=ts` });
+                try { fs.rmSync(sessionDir, { recursive: true, force: true }); } catch (e) {}
+                resolve();
+            }
+        });
+        
+        ffmpeg.on('error', (err) => {
+            log(session, `FFmpeg error: ${err.message}`);
+            sendEvent(session, 'complete', { fileUrl: `/api/download_file?sessionId=${sessionId}&format=ts` });
+            try { fs.rmSync(sessionDir, { recursive: true, force: true }); } catch (e) {}
+            resolve();
+        });
+    });
+  } catch (err) {
+    throw new Error(`Merge failed: ${err.message}`);
+  }
 }
 
 app.get('/api/download_file', (req, res) => {
