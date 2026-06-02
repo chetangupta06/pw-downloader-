@@ -10,8 +10,8 @@ const http = require('http');
 const https = require('https');
 
 const axiosInstance = axios.create({
-  httpAgent: new http.Agent({ keepAlive: true, maxSockets: 50 }),
-  httpsAgent: new https.Agent({ keepAlive: true, maxSockets: 50 }),
+  httpAgent: new http.Agent({ keepAlive: true, maxSockets: 200 }),
+  httpsAgent: new https.Agent({ keepAlive: true, maxSockets: 200 }),
 });
 
 const app = express();
@@ -387,7 +387,7 @@ async function processDownload(sessionId, m3u8Url) {
   let downloadedBytes = 0;
   
   let currentIndex = 0;
-  const CONCURRENCY_LIMIT = 15;
+  const CONCURRENCY_LIMIT = 50;
   let hasError = false;
 
   const worker = async () => {
