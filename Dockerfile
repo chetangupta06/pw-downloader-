@@ -26,6 +26,9 @@ RUN cd frontend && npm run build
 EXPOSE 7860
 ENV PORT=7860
 
+# Fix permissions for the copied files before switching users
+RUN chown -R node:node /app
+
 # Switch to non-root user
 USER node
 
