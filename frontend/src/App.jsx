@@ -34,7 +34,7 @@ function App() {
   useEffect(() => {
     if (!sessionId) return;
     
-    const eventSource = new EventSource(`http://localhost:3000/api/events?sessionId=${sessionId}`);
+    const eventSource = new EventSource(`/api/events?sessionId=${sessionId}`);
     
     eventSource.addEventListener('log', (e) => {
       const data = JSON.parse(e.data);
