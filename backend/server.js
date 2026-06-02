@@ -387,7 +387,7 @@ async function processDownload(sessionId, m3u8Url) {
   let downloadedBytes = 0;
   
   let currentIndex = 0;
-  const CONCURRENCY_LIMIT = 50;
+  const CONCURRENCY_LIMIT = 100;
   let hasError = false;
 
   const worker = async () => {
