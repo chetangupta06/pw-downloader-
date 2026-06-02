@@ -1,0 +1,532 @@
+const express = require('express');
+const cors = require('cors');
+const axios = require('axios');
+const m3u8Parser = require('m3u8-parser');
+const fs = require('fs');
+const path = require('path');
+const { spawn } = require('child_process');
+const crypto = require('crypto');
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+// Serve static frontend files for Monorepo deployment
+app.use(express.static(path.join(__dirname, '../frontend/dist')));
+
+const activeSessions = new Map();
+
+// Ensure temp directory exists
+const TMP_DIR = path.join(__dirname, 'tmp');
+if (!fs.existsSync(TMP_DIR)) {
+  fs.mkdirSync(TMP_DIR);
+}
+
+// Ensure output directory exists
+const OUT_DIR = path.join(__dirname, 'output');
+if (!fs.existsSync(OUT_DIR)) {
+  fs.mkdirSync(OUT_DIR);
+}
+
+const sendEvent = (session, type, data) => {
+  if (session.res) {
+    session.res.write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`);
+  }
+};
+
+const log = (session, message) => {
+  const timestamp = new Date().toISOString().split('T')[1].substring(0, 12);
+  const formattedMessage = `[${timestamp}] ${message}`;
+  console.log(formattedMessage);
+  sendEvent(session, 'log', { message: formattedMessage });
+};
+
+// Helper to preserve query parameters
+const resolveUrl = (relative, base) => {
+    const baseUrlObj = new URL(base);
+    const resolved = new URL(relative, base);
+    for (const [key, value] of baseUrlObj.searchParams.entries()) {
+        if (!resolved.searchParams.has(key)) {
+            resolved.searchParams.set(key, value);
+        }
+    }
+    return resolved.href;
+};
+
+app.get('/api/parse', async (req, res) => {
+  const { url } = req.query;
+  if (!url) return res.status(400).json({ error: 'URL is required' });
+
+  try {
+    const urlObj = new URL(url);
+    if (urlObj.pathname.match(/\/(\d+)\.mp4$/)) {
+      return res.json({
+        qualities: [{
+          resolution: 'Sequential DASH (Multiple Parts)',
+          bandwidth: 'Unknown',
+          url: url
+        }],
+        isSequentialDash: true
+      });
+    }
+
+    const response = await axios.get(url);
+    const parser = new m3u8Parser.Parser();
+    parser.push(response.data);
+    parser.end();
+
+    const manifest = parser.manifest;
+    let qualities = [];
+
+    if (manifest.playlists && manifest.playlists.length > 0) {
+      // It's a master playlist
+      qualities = manifest.playlists.map(p => ({
+        resolution: p.attributes.RESOLUTION ? `${p.attributes.RESOLUTION.width}x${p.attributes.RESOLUTION.height}` : 'Unknown',
+        bandwidth: p.attributes.BANDWIDTH,
+        url: resolveUrl(p.uri, url)
+      }));
+    } else if (manifest.segments && manifest.segments.length > 0) {
+      // It's already a media playlist
+      qualities = [{
+        resolution: 'Default',
+        bandwidth: 'Unknown',
+        url: url
+      }];
+    }
+
+    res.json({ qualities, manifest });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to fetch or parse URL' });
+  }
+});
+
+app.post('/api/download', async (req, res) => {
+  const { url } = req.body;
+  const sessionId = Date.now().toString();
+
+  const session = {
+    id: sessionId,
+    res: null, // For SSE connection
+    url: url,
+    status: 'downloading'
+  };
+  activeSessions.set(sessionId, session);
+
+  res.json({ sessionId });
+
+  // Start background process
+  processDownload(sessionId, url).catch(err => {
+    log(session, `ERROR: ${err.message}`);
+    sendEvent(session, 'error', { error: err.message });
+  });
+});
+
+app.get('/api/events', (req, res) => {
+  const { sessionId } = req.query;
+  const session = activeSessions.get(sessionId);
+
+  if (!session) {
+    return res.status(404).json({ error: 'Session not found' });
+  }
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  session.res = res;
+  
+  req.on('close', () => {
+    session.res = null;
+  });
+});
+
+app.post('/api/pause', (req, res) => {
+    const { sessionId } = req.body;
+    const session = activeSessions.get(sessionId);
+    if (!session) return res.status(404).json({ error: 'Session not found' });
+    
+    session.status = 'paused';
+    log(session, 'Download paused by user.');
+    res.json({ success: true });
+});
+
+app.post('/api/resume', (req, res) => {
+    const { sessionId } = req.body;
+    const session = activeSessions.get(sessionId);
+    if (!session) return res.status(404).json({ error: 'Session not found' });
+    
+    session.status = 'downloading';
+    log(session, 'Download resumed.');
+    res.json({ success: true });
+});
+
+async function processDownload(sessionId, m3u8Url) {
+  const session = activeSessions.get(sessionId);
+  log(session, `Starting download process for: ${m3u8Url}`);
+  
+  const urlObj = new URL(m3u8Url);
+  const match = urlObj.pathname.match(/\/(\d+)\.mp4$/);
+  
+  if (match) {
+     log(session, `Sequential DASH stream detected. Starting brute-force download...`);
+     
+     const sessionDir = path.join(TMP_DIR, sessionId);
+     fs.mkdirSync(sessionDir);
+     const listFilePath = path.join(sessionDir, 'list.txt');
+     let listFileContent = '';
+     
+     let downloadedCount = 0;
+     let consecutiveErrors = 0;
+     
+     // Start from segment 1, or whatever number was in the URL
+     const startNum = parseInt(match[1], 10);
+     let i = startNum;
+
+     // Attempt to download the initialization segment first!
+     log(session, `Attempting to fetch DASH initialization segment...`);
+     const initNames = ['init.mp4', '0.mp4'];
+     for (const initName of initNames) {
+         try {
+             const newPath = urlObj.pathname.replace(/\/(\d+)\.mp4$/, `/${initName}`);
+             const initUrl = urlObj.origin + newPath + urlObj.search;
+             const initPath = path.join(sessionDir, `seg_init.mp4`);
+             
+             const initRes = await axios({
+                 url: initUrl,
+                 method: 'GET',
+                 responseType: 'stream',
+                 timeout: 10000
+             });
+             
+             const writer = fs.createWriteStream(initPath);
+             initRes.data.pipe(writer);
+             
+             await new Promise((resolve, reject) => {
+                 writer.on('finish', resolve);
+                 writer.on('error', reject);
+             });
+             
+             log(session, `Successfully downloaded initialization segment (${initName}).`);
+             break;
+         } catch (e) {
+             // Just continue checking the next name
+         }
+     }
+     
+     while (true) {
+         // Replace the number in the pathname
+         const newPath = urlObj.pathname.replace(/\/(\d+)\.mp4$/, `/${i}.mp4`);
+         const segmentUrl = urlObj.origin + newPath + urlObj.search;
+         const segmentPath = path.join(sessionDir, `seg_${i}.mp4`);
+         
+         try {
+             const segRes = await axios({
+                 url: segmentUrl,
+                 method: 'GET',
+                 responseType: 'stream',
+                 timeout: 10000 // 10s timeout
+             });
+             
+             const writer = fs.createWriteStream(segmentPath);
+             segRes.data.pipe(writer);
+             
+             await new Promise((resolve, reject) => {
+                 writer.on('finish', resolve);
+                 writer.on('error', reject);
+             });
+             
+             listFileContent += `file 'seg_${i}.mp4'\n`;
+             downloadedCount++;
+             consecutiveErrors = 0; // reset
+             
+             if (downloadedCount % 5 === 0) {
+                 log(session, `Downloaded ${downloadedCount} segments so far...`);
+                 sendEvent(session, 'progress', { downloaded: downloadedCount, total: '?', isDirectMB: false });
+             }
+             
+             i++;
+         } catch (error) {
+             // 403 or 404 means we likely hit the end of the stream
+             log(session, `Segment ${i} failed (${error.response?.status || error.message}). Assuming end of stream.`);
+             consecutiveErrors++;
+             if (consecutiveErrors >= 2) {
+                 break;
+             }
+         }
+     }
+     
+     log(session, `Total ${downloadedCount} segments downloaded. Merging files...`);
+     
+     const outputPath = path.join(OUT_DIR, `${sessionId}.mp4`);
+     
+     return new Promise((resolve, reject) => {
+       try {
+         const finalStream = fs.createWriteStream(outputPath);
+         
+         const initPath = path.join(sessionDir, `seg_init.mp4`);
+         if (fs.existsSync(initPath)) {
+             const initData = fs.readFileSync(initPath);
+             finalStream.write(initData);
+         }
+         
+         for (let j = startNum; j < i; j++) {
+            const segmentPath = path.join(sessionDir, `seg_${j}.mp4`);
+            if (fs.existsSync(segmentPath)) {
+               const data = fs.readFileSync(segmentPath);
+               finalStream.write(data);
+            }
+         }
+         finalStream.end();
+         
+         finalStream.on('finish', () => {
+             log(session, 'Merge completed successfully.');
+             sendEvent(session, 'complete', { fileUrl: `http://localhost:3000/api/download_file?sessionId=${sessionId}` });
+             fs.rmSync(sessionDir, { recursive: true, force: true });
+             resolve();
+         });
+         
+         finalStream.on('error', (err) => {
+             reject(err);
+         });
+       } catch (err) {
+         reject(err);
+       }
+     });
+  }
+
+  // Fallback to standard M3U8 process
+  let response = await axios.get(m3u8Url);
+  let parser = new m3u8Parser.Parser();
+  parser.push(response.data);
+  parser.end();
+  let manifest = parser.manifest;
+
+  if (manifest.playlists && manifest.playlists.length > 0) {
+      log(session, 'Master playlist detected. Selecting best quality...');
+      manifest.playlists.sort((a, b) => (b.attributes.BANDWIDTH || 0) - (a.attributes.BANDWIDTH || 0));
+      const bestQualityUrl = resolveUrl(manifest.playlists[0].uri, m3u8Url);
+      
+      log(session, `Fetching segments for best quality...`);
+      response = await axios.get(bestQualityUrl);
+      parser = new m3u8Parser.Parser();
+      parser.push(response.data);
+      parser.end();
+      manifest = parser.manifest;
+      
+      // Update base URL for relative segment paths
+      m3u8Url = bestQualityUrl;
+  }
+
+  if (!manifest.segments || manifest.segments.length === 0) {
+    throw new Error('No segments found in the playlist. Make sure you select a specific quality/media playlist, not a master playlist.');
+  }
+
+  const totalSegments = manifest.segments.length;
+  log(session, `Found ${totalSegments} segments.`);
+  sendEvent(session, 'info', { totalSegments });
+
+  // Check for AES-128 Encryption
+  let aesKeyBuffer = null;
+  const firstSeg = manifest.segments[0];
+  if (firstSeg && firstSeg.key && firstSeg.key.method === 'AES-128') {
+      log(session, 'AES-128 Encryption detected. Fetching decryption key...');
+      let keyUrl = firstSeg.key.uri;
+      
+      // If URI doesn't include domain, resolve it
+      if (!keyUrl.startsWith('http')) {
+          keyUrl = resolveUrl(keyUrl, m3u8Url);
+      }
+      
+      // MAGIC BYPASS: If the key URL points to the secure API which requires Auth,
+      // we can fetch it directly from the CDN since the CDN hosts it alongside the video!
+      if (keyUrl.includes('api.penpencil.co')) {
+          const m3u8UrlObj = new URL(m3u8Url);
+          // m3u8Url is like: https://sec-prod-mediacdn.pw.live/UUID/hls/720/main.m3u8
+          const match = m3u8UrlObj.pathname.match(/^\/([^\/]+)\//);
+          if (match) {
+              const videoId = match[1]; 
+              keyUrl = `${m3u8UrlObj.origin}/${videoId}/hls/enc.key${m3u8UrlObj.search}`;
+              log(session, 'Bypassing Auth: Remapped Key URL directly to PW CDN.');
+          }
+      }
+      
+      try {
+          const keyRes = await axios.get(keyUrl, {
+              responseType: 'arraybuffer'
+          });
+          aesKeyBuffer = Buffer.from(keyRes.data);
+          log(session, 'Successfully fetched decryption key from CDN.');
+      } catch (e) {
+          throw new Error('Failed to fetch decryption key. ' + (e.response ? e.response.status : e.message));
+      }
+  }
+
+  const sessionDir = path.join(TMP_DIR, sessionId);
+  fs.mkdirSync(sessionDir);
+  const listFilePath = path.join(sessionDir, 'list.txt');
+  let listFileContent = '';
+
+  let downloadedCount = 0;
+  let downloadedBytes = 0;
+  
+  let currentIndex = 0;
+  const CONCURRENCY_LIMIT = 15;
+  let hasError = false;
+
+  const worker = async () => {
+      while (currentIndex < totalSegments && !hasError) {
+          // Check pause status
+          while (session.status === 'paused') {
+              await new Promise(resolve => setTimeout(resolve, 500));
+          }
+
+          if (hasError) break;
+
+          const i = currentIndex++;
+          const segment = manifest.segments[i];
+          const segmentUrl = resolveUrl(segment.uri, m3u8Url);
+          const segmentPath = path.join(sessionDir, `seg_${i}.ts`);
+          
+          try {
+              const segRes = await axios({
+                  url: segmentUrl,
+                  method: 'GET',
+                  responseType: 'stream',
+              });
+
+              const writer = fs.createWriteStream(segmentPath);
+              
+              if (aesKeyBuffer) {
+                  // HLS Spec: IV is either provided or is the segment sequence number
+                  let ivBuffer;
+                  if (segment.key && segment.key.iv) {
+                      ivBuffer = Buffer.alloc(16);
+                      for (let k = 0; k < 4; k++) {
+                          ivBuffer.writeUInt32BE(segment.key.iv[k] || 0, k * 4);
+                      }
+                  } else {
+                      const seqNum = manifest.mediaSequence + i;
+                      ivBuffer = Buffer.alloc(16);
+                      ivBuffer.writeUInt32BE(seqNum, 12);
+                  }
+                  
+                  const decipher = crypto.createDecipheriv('aes-128-cbc', aesKeyBuffer, ivBuffer);
+                  segRes.data.pipe(decipher).pipe(writer);
+              } else {
+                  segRes.data.pipe(writer);
+              }
+              
+              await new Promise((resolve, reject) => {
+                  writer.on('finish', resolve);
+                  writer.on('error', reject);
+              });
+
+              const stat = fs.statSync(segmentPath);
+              downloadedBytes += stat.size;
+              downloadedCount++;
+              
+              if (downloadedCount % 10 === 0 || downloadedCount === totalSegments) {
+                  log(session, `Downloaded ${downloadedCount}/${totalSegments} segments...`);
+                  const downloadedMB = (downloadedBytes / (1024 * 1024)).toFixed(2);
+                  const estMB = ((downloadedBytes / downloadedCount) * totalSegments / (1024 * 1024)).toFixed(2);
+                  sendEvent(session, 'progress', { downloadedCount, totalSegments, downloadedMB, estMB, isDirectMB: true });
+              }
+          } catch (err) {
+              log(session, `Error downloading segment ${i}: ${err.message}`);
+              hasError = true;
+              throw err;
+          }
+      }
+  };
+
+  // Launch workers
+  const workers = Array(CONCURRENCY_LIMIT).fill(null).map(() => worker());
+  await Promise.all(workers);
+
+  if (hasError) {
+      throw new Error('Download failed due to segment error.');
+  }
+
+  // Generate list file for native merge
+  for (let i = 0; i < totalSegments; i++) {
+      listFileContent += `file 'seg_${i}.ts'\n`;
+  }
+
+  log(session, 'All segments downloaded. Merging files...');
+
+  const outputPath = path.join(OUT_DIR, `${sessionId}.ts`);
+  const outputMp4Path = path.join(OUT_DIR, `${sessionId}.mp4`);
+  
+  return new Promise((resolve, reject) => {
+    try {
+      const finalStream = fs.createWriteStream(outputPath);
+      for (let j = 0; j < totalSegments; j++) {
+         const segmentPath = path.join(sessionDir, `seg_${j}.ts`);
+         if (fs.existsSync(segmentPath)) {
+             const data = fs.readFileSync(segmentPath);
+             finalStream.write(data);
+         }
+      }
+      finalStream.end();
+      
+      finalStream.on('finish', () => {
+          log(session, 'TS Merge completed. Remuxing to MP4 (Zero quality loss)...');
+          
+          const ffmpeg = spawn('ffmpeg', ['-i', outputPath, '-c', 'copy', outputMp4Path]);
+          
+          ffmpeg.on('close', (code) => {
+              if (code === 0) {
+                  log(session, 'MP4 Remux successful! Ready to save.');
+                  sendEvent(session, 'complete', { fileUrl: `http://localhost:3000/api/download_file?sessionId=${sessionId}&format=mp4` });
+                  try {
+                      fs.unlinkSync(outputPath);
+                      fs.rmSync(sessionDir, { recursive: true, force: true });
+                  } catch (e) {}
+                  resolve();
+              } else {
+                  log(session, 'MP4 Remux failed. Serving TS instead.');
+                  sendEvent(session, 'complete', { fileUrl: `http://localhost:3000/api/download_file?sessionId=${sessionId}&format=ts` });
+                  try { fs.rmSync(sessionDir, { recursive: true, force: true }); } catch (e) {}
+                  resolve();
+              }
+          });
+          
+          ffmpeg.on('error', (err) => {
+              log(session, `FFmpeg error: ${err.message}`);
+              sendEvent(session, 'complete', { fileUrl: `http://localhost:3000/api/download_file?sessionId=${sessionId}&format=ts` });
+              try { fs.rmSync(sessionDir, { recursive: true, force: true }); } catch (e) {}
+              resolve();
+          });
+      });
+      
+      finalStream.on('error', (err) => {
+          reject(err);
+      });
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
+app.get('/api/download_file', (req, res) => {
+  const { sessionId, format = 'ts' } = req.query;
+  const filePath = path.join(OUT_DIR, `${sessionId}.${format}`);
+  
+  if (fs.existsSync(filePath)) {
+    res.download(filePath, `lecture.${format}`);
+  } else {
+    res.status(404).send('File not found');
+  }
+});
+
+// Catch-all route to serve the React frontend
+app.use((req, res) => {
+  res.sendFile(path.join(__dirname, '../frontend/dist/index.html'));
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Backend server running on port ${PORT}`);
+});
