@@ -6,6 +6,13 @@ const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 const crypto = require('crypto');
+const http = require('http');
+const https = require('https');
+
+const axiosInstance = axios.create({
+  httpAgent: new http.Agent({ keepAlive: true, maxSockets: 50 }),
+  httpsAgent: new https.Agent({ keepAlive: true, maxSockets: 50 }),
+});
 
 const app = express();
 app.use(cors());
@@ -202,7 +209,7 @@ async function processDownload(sessionId, m3u8Url) {
              const initUrl = urlObj.origin + newPath + urlObj.search;
              const initPath = path.join(sessionDir, `seg_init.mp4`);
              
-             const initRes = await axios({
+             const initRes = await axiosInstance({
                  url: initUrl,
                  method: 'GET',
                  responseType: 'stream',
@@ -231,7 +238,7 @@ async function processDownload(sessionId, m3u8Url) {
          const segmentPath = path.join(sessionDir, `seg_${i}.mp4`);
          
          try {
-             const segRes = await axios({
+             const segRes = await axiosInstance({
                  url: segmentUrl,
                  method: 'GET',
                  responseType: 'stream',
@@ -398,7 +405,7 @@ async function processDownload(sessionId, m3u8Url) {
           const segmentPath = path.join(sessionDir, `seg_${i}.ts`);
           
           try {
-              const segRes = await axios({
+              const segRes = await axiosInstance({
                   url: segmentUrl,
                   method: 'GET',
                   responseType: 'stream',
