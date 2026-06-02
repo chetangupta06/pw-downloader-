@@ -3,8 +3,10 @@ FROM node:20-bullseye
 # Install FFmpeg for remuxing
 RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
 
-# Set working directory
+# Set working directory and create user for Hugging Face (UID 1000)
+RUN useradd -m -u 1000 user
 WORKDIR /app
+RUN chown -R user:user /app
 
 # Install backend dependencies
 COPY backend/package*.json ./backend/
@@ -21,8 +23,12 @@ COPY frontend/ ./frontend/
 # Build the React frontend
 RUN cd frontend && npm run build
 
-# Expose Render default port
-EXPOSE 3000
+# Hugging Face Spaces expects port 7860
+EXPOSE 7860
+ENV PORT=7860
+
+# Switch to non-root user
+USER user
 
 # Start the Node backend
 CMD ["node", "backend/server.js"]
