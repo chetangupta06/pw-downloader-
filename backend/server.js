@@ -165,6 +165,14 @@ app.post('/api/resume', (req, res) => {
 
 async function processDownload(sessionId, m3u8Url) {
   const session = activeSessions.get(sessionId);
+  
+  // Wait up to 5 seconds for the frontend to connect via SSE before starting
+  let attempts = 0;
+  while (!session.res && attempts < 50) {
+      await new Promise(r => setTimeout(r, 100));
+      attempts++;
+  }
+
   log(session, `Starting download process for: ${m3u8Url}`);
   
   const urlObj = new URL(m3u8Url);
@@ -283,7 +291,7 @@ async function processDownload(sessionId, m3u8Url) {
          
          finalStream.on('finish', () => {
              log(session, 'Merge completed successfully.');
-             sendEvent(session, 'complete', { fileUrl: `http://localhost:3000/api/download_file?sessionId=${sessionId}` });
+             sendEvent(session, 'complete', { fileUrl: `/api/download_file?sessionId=${sessionId}` });
              fs.rmSync(sessionDir, { recursive: true, force: true });
              resolve();
          });
@@ -480,7 +488,7 @@ async function processDownload(sessionId, m3u8Url) {
           ffmpeg.on('close', (code) => {
               if (code === 0) {
                   log(session, 'MP4 Remux successful! Ready to save.');
-                  sendEvent(session, 'complete', { fileUrl: `http://localhost:3000/api/download_file?sessionId=${sessionId}&format=mp4` });
+                  sendEvent(session, 'complete', { fileUrl: `/api/download_file?sessionId=${sessionId}&format=mp4` });
                   try {
                       fs.unlinkSync(outputPath);
                       fs.rmSync(sessionDir, { recursive: true, force: true });
@@ -488,7 +496,7 @@ async function processDownload(sessionId, m3u8Url) {
                   resolve();
               } else {
                   log(session, 'MP4 Remux failed. Serving TS instead.');
-                  sendEvent(session, 'complete', { fileUrl: `http://localhost:3000/api/download_file?sessionId=${sessionId}&format=ts` });
+                  sendEvent(session, 'complete', { fileUrl: `/api/download_file?sessionId=${sessionId}&format=ts` });
                   try { fs.rmSync(sessionDir, { recursive: true, force: true }); } catch (e) {}
                   resolve();
               }
@@ -496,7 +504,7 @@ async function processDownload(sessionId, m3u8Url) {
           
           ffmpeg.on('error', (err) => {
               log(session, `FFmpeg error: ${err.message}`);
-              sendEvent(session, 'complete', { fileUrl: `http://localhost:3000/api/download_file?sessionId=${sessionId}&format=ts` });
+              sendEvent(session, 'complete', { fileUrl: `/api/download_file?sessionId=${sessionId}&format=ts` });
               try { fs.rmSync(sessionDir, { recursive: true, force: true }); } catch (e) {}
               resolve();
           });
