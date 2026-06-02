@@ -462,59 +462,59 @@ async function processDownload(sessionId, m3u8Url) {
       listFileContent += `file 'seg_${i}.ts'\n`;
   }
 
-  log(session, 'All segments downloaded. Merging files...');
+  log(session, 'All segments downloaded. Piping directly to FFmpeg (Zero quality loss)...');
 
-  const outputPath = path.join(OUT_DIR, `${sessionId}.ts`);
   const outputMp4Path = path.join(OUT_DIR, `${sessionId}.mp4`);
   
   try {
-    const finalStream = fs.createWriteStream(outputPath);
+    const ffmpeg = spawn('ffmpeg', [
+        '-y', // Overwrite output files without asking
+        '-i', 'pipe:0', // Read from standard input
+        '-c', 'copy', // Copy streams exactly without re-encoding
+        outputMp4Path
+    ]);
+    
+    // We don't want the server to crash if ffmpeg throws a generic warning
+    ffmpeg.stdin.on('error', (err) => {
+        // Ignored, handled by close event
+    });
+
     for (let j = 0; j < totalSegments; j++) {
        const segmentPath = path.join(sessionDir, `seg_${j}.ts`);
        if (fs.existsSync(segmentPath)) {
            const data = await fs.promises.readFile(segmentPath);
-           const canWrite = finalStream.write(data);
-           if (!canWrite) await new Promise(r => finalStream.once('drain', r));
+           const canWrite = ffmpeg.stdin.write(data);
+           if (!canWrite) await new Promise(r => ffmpeg.stdin.once('drain', r));
        }
     }
-    finalStream.end();
+    
+    // Close the pipe to tell ffmpeg we are done sending data
+    ffmpeg.stdin.end();
     
     await new Promise((resolve, reject) => {
-        finalStream.on('finish', resolve);
-        finalStream.on('error', reject);
-    });
-    
-    log(session, 'TS Merge completed. Remuxing to MP4 (Zero quality loss)...');
-    
-    await new Promise((resolve) => {
-        const ffmpeg = spawn('ffmpeg', ['-i', outputPath, '-c', 'copy', outputMp4Path]);
-        
         ffmpeg.on('close', (code) => {
             if (code === 0) {
                 log(session, 'MP4 Remux successful! Ready to save.');
                 sendEvent(session, 'complete', { fileUrl: `/api/download_file?sessionId=${sessionId}&format=mp4` });
-                try {
-                    fs.unlinkSync(outputPath);
-                    fs.rmSync(sessionDir, { recursive: true, force: true });
-                } catch (e) {}
-                resolve();
-            } else {
-                log(session, 'MP4 Remux failed. Serving TS instead.');
-                sendEvent(session, 'complete', { fileUrl: `/api/download_file?sessionId=${sessionId}&format=ts` });
                 try { fs.rmSync(sessionDir, { recursive: true, force: true }); } catch (e) {}
                 resolve();
+            } else {
+                log(session, `MP4 Remux failed (Code ${code}). Check logs.`);
+                sendEvent(session, 'error', { error: 'FFmpeg processing failed' });
+                try { fs.rmSync(sessionDir, { recursive: true, force: true }); } catch (e) {}
+                reject(new Error('FFmpeg failed'));
             }
         });
         
         ffmpeg.on('error', (err) => {
             log(session, `FFmpeg error: ${err.message}`);
-            sendEvent(session, 'complete', { fileUrl: `/api/download_file?sessionId=${sessionId}&format=ts` });
+            sendEvent(session, 'error', { error: 'FFmpeg processing failed' });
             try { fs.rmSync(sessionDir, { recursive: true, force: true }); } catch (e) {}
-            resolve();
+            reject(err);
         });
     });
   } catch (err) {
-    throw new Error(`Merge failed: ${err.message}`);
+    throw new Error(`Direct Merge/Remux failed: ${err.message}`);
   }
 }
 
