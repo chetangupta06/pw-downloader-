@@ -372,17 +372,16 @@ async function processDownload(sessionId, m3u8Url) {
           keyUrl = resolveUrl(keyUrl, m3u8Url);
       }
       
-      // MAGIC BYPASS: If the key URL points to the secure API which requires Auth,
-      // we can fetch it directly from the CDN since the CDN hosts it alongside the video!
-      if (keyUrl.includes('api.penpencil.co')) {
-          const m3u8UrlObj = new URL(m3u8Url);
-          // m3u8Url is like: https://sec-prod-mediacdn.pw.live/UUID/hls/720/main.m3u8
-          const match = m3u8UrlObj.pathname.match(/^\/([^\/]+)\//);
-          if (match) {
-              const videoId = match[1]; 
-              keyUrl = `${m3u8UrlObj.origin}/${videoId}/hls/enc.key${m3u8UrlObj.search}`;
-              log(session, 'Bypassing Auth: Remapped Key URL directly to PW CDN.');
-          }
+      // MAGIC BYPASS / FIX: The AES key is always hosted at the root /hls/enc.key on the CDN.
+      // Sometimes PW claims it's on api.penpencil.co (which requires an Auth token).
+      // Sometimes PW provides a relative path like /hls/720/enc.key (which returns 403 Forbidden).
+      // We ignore both and forcefully construct the true root CDN path!
+      const m3u8UrlObj = new URL(m3u8Url);
+      const match = m3u8UrlObj.pathname.match(/^\/([^\/]+)\//);
+      if (match) {
+          const videoId = match[1]; 
+          keyUrl = `${m3u8UrlObj.origin}/${videoId}/hls/enc.key${m3u8UrlObj.search}`;
+          log(session, 'Forcefully remapped AES Key URL to root HLS directory on CDN.');
       }
       
       try {
