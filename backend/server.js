@@ -541,6 +541,30 @@ app.use((req, res) => {
   res.sendFile(path.join(__dirname, '../frontend/dist/index.html'));
 });
 
+// --- Telegram Bot Integration ---
+const TelegramBot = require('node-telegram-bot-api');
+const telegramToken = '8860095471:AAGElsZYQ5TRS0_-QxjxKSgYp9_iVC8UA3Y';
+try {
+  const bot = new TelegramBot(telegramToken, { polling: true });
+  bot.onText(/\/start/, (msg) => {
+    const chatId = msg.chat.id;
+    bot.sendMessage(chatId, 'Welcome to PW Downloader! Click the button below to start downloading your lectures.', {
+      reply_markup: {
+        inline_keyboard: [[
+          {
+            text: 'Open Downloader 🚀',
+            web_app: { url: 'https://chetangupta06-pw-downloader.hf.space' }
+          }
+        ]]
+      }
+    });
+  });
+  console.log('Telegram Bot is active...');
+} catch(e) {
+  console.log('Failed to start Telegram Bot:', e.message);
+}
+// --------------------------------
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Backend server running on port ${PORT}`);
