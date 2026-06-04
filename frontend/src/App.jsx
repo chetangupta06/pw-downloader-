@@ -190,14 +190,23 @@ function App() {
               <LinkIcon size={16} color="#8b5cf6" style={{ marginRight: '8px', verticalAlign: 'text-bottom' }} />
               Video URL
             </label>
-            <input 
-              type="text" 
-              className="url-input" 
-              placeholder="Paste your PW video link here... (e.g. master.m3u8)"
-              value={url}
-              onChange={(e) => setUrl(e.target.value.replace(/\.mpd/gi, '.m3u8'))}
-              disabled={isFetching || isDownloading}
-            />
+            <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+              <input 
+                type="text" 
+                className="url-input" 
+                style={{ paddingRight: '40px' }}
+                placeholder="Paste here master.mpd link..."
+                value={url}
+                onChange={(e) => setUrl(e.target.value.replace(/\.mpd/gi, '.m3u8'))}
+                disabled={isFetching || isDownloading}
+              />
+              <div 
+                title="Paste your .mpd or .m3u8 link here. The app will automatically convert it!"
+                style={{ position: 'absolute', right: '12px', color: '#9ca3af', cursor: 'help', display: 'flex' }}
+              >
+                <Info size={18} />
+              </div>
+            </div>
           </div>
 
             <button 
