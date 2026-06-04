@@ -231,47 +231,65 @@ async function processDownload(sessionId, m3u8Url) {
          }
      }
      
-     while (true) {
-         // Replace the number in the pathname
-         const newPath = urlObj.pathname.replace(/\/(\d+)\.mp4$/, `/${i}.mp4`);
-         const segmentUrl = urlObj.origin + newPath + urlObj.search;
-         const segmentPath = path.join(sessionDir, `seg_${i}.mp4`);
-         
-         try {
-             const segRes = await axiosInstance({
-                 url: segmentUrl,
-                 method: 'GET',
-                 responseType: 'stream',
-                 timeout: 10000 // 10s timeout
-             });
+     let currentIndex = startNum;
+     let maxSuccessfulIndex = startNum - 1;
+     let hasHitEnd = false;
+     let consecutiveNotFound = 0;
+     const CONCURRENCY = 50;
+
+     const worker = async () => {
+         while (!hasHitEnd && consecutiveNotFound < 3) {
+             const currentI = currentIndex++;
+             const newPath = urlObj.pathname.replace(/\/(\d+)\.mp4$/, `/${currentI}.mp4`);
+             const segmentUrl = urlObj.origin + newPath + urlObj.search;
+             const segmentPath = path.join(sessionDir, `seg_${currentI}.mp4`);
              
-             const writer = fs.createWriteStream(segmentPath);
-             segRes.data.pipe(writer);
-             
-             await new Promise((resolve, reject) => {
-                 writer.on('finish', resolve);
-                 writer.on('error', reject);
-             });
-             
-             listFileContent += `file 'seg_${i}.mp4'\n`;
-             downloadedCount++;
-             consecutiveErrors = 0; // reset
-             
-             if (downloadedCount % 5 === 0) {
-                 log(session, `Downloaded ${downloadedCount} segments so far...`);
-                 sendEvent(session, 'progress', { downloaded: downloadedCount, total: '?', isDirectMB: false });
-             }
-             
-             i++;
-         } catch (error) {
-             // 403 or 404 means we likely hit the end of the stream
-             log(session, `Segment ${i} failed (${error.response?.status || error.message}). Assuming end of stream.`);
-             consecutiveErrors++;
-             if (consecutiveErrors >= 2) {
-                 break;
+             try {
+                 const segRes = await axiosInstance({
+                     url: segmentUrl,
+                     method: 'GET',
+                     responseType: 'stream',
+                     timeout: 10000
+                 });
+                 
+                 const writer = fs.createWriteStream(segmentPath);
+                 segRes.data.pipe(writer);
+                 
+                 await new Promise((resolve, reject) => {
+                     writer.on('finish', resolve);
+                     writer.on('error', reject);
+                 });
+                 
+                 downloadedCount++;
+                 maxSuccessfulIndex = Math.max(maxSuccessfulIndex, currentI);
+                 consecutiveNotFound = 0; // reset
+                 
+                 if (downloadedCount % 20 === 0) {
+                     log(session, `Downloaded ${downloadedCount} segments so far...`);
+                     sendEvent(session, 'progress', { downloaded: downloadedCount, total: '?', isDirectMB: false });
+                 }
+             } catch (error) {
+                 if (error.response && (error.response.status === 403 || error.response.status === 404)) {
+                     consecutiveNotFound++;
+                     if (consecutiveNotFound >= 3) {
+                         hasHitEnd = true;
+                         log(session, `Hit end of stream near segment ${currentI}.`);
+                     }
+                 } else {
+                     consecutiveNotFound++;
+                 }
              }
          }
+     };
+
+     const workers = [];
+     for (let w = 0; w < CONCURRENCY; w++) {
+         workers.push(worker());
      }
+     await Promise.all(workers);
+     
+     // Update i so the merge loop knows where to stop
+     i = maxSuccessfulIndex + 1;
      
      log(session, `Total ${downloadedCount} segments downloaded. Merging files...`);
      
