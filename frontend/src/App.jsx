@@ -197,7 +197,14 @@ function App() {
                 style={{ paddingRight: '40px' }}
                 placeholder="Paste here master.mpd link..."
                 value={url}
-                onChange={(e) => setUrl(e.target.value.replace(/\.mpd/gi, '.m3u8'))}
+                onChange={(e) => {
+                  let val = e.target.value;
+                  // 1. Convert .mpd to .m3u8
+                  val = val.replace(/\.mpd/gi, '.m3u8');
+                  // 2. Intelligently convert direct DASH .mp4 links back into the Master Playlist menu!
+                  val = val.replace(/(https:\/\/[^\/]+\/[a-fA-F0-9\-]+)\/dash\/.*?\.mp4(\?.*)?/gi, '$1/master.m3u8$2');
+                  setUrl(val);
+                }}
                 disabled={isFetching || isDownloading}
               />
               <div 
