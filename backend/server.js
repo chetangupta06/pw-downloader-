@@ -561,23 +561,27 @@ app.use((req, res) => {
 
 // --- Telegram Bot Integration ---
 const TelegramBot = require('node-telegram-bot-api');
-const telegramToken = '8860095471:AAGElsZYQ5TRS0_-QxjxKSgYp9_iVC8UA3Y';
+const telegramToken = process.env.TELEGRAM_BOT_TOKEN;
 try {
-  const bot = new TelegramBot(telegramToken, { polling: true });
-  bot.onText(/\/start/, (msg) => {
-    const chatId = msg.chat.id;
-    bot.sendMessage(chatId, 'Welcome to PW Downloader! Click the button below to start downloading your lectures.', {
-      reply_markup: {
-        inline_keyboard: [[
-          {
-            text: 'Open Downloader 🚀',
-            web_app: { url: 'https://chetangupta06-pw-downloader.hf.space' }
-          }
-        ]]
-      }
+  if (telegramToken) {
+    const bot = new TelegramBot(telegramToken, { polling: true });
+    bot.onText(/\/start/, (msg) => {
+      const chatId = msg.chat.id;
+      bot.sendMessage(chatId, 'Welcome to PW Downloader! Click the button below to start downloading your lectures.', {
+        reply_markup: {
+          inline_keyboard: [[
+            {
+              text: 'Open Downloader 🚀',
+              web_app: { url: 'https://chetangupta06-pw-downloader.hf.space' }
+            }
+          ]]
+        }
+      });
     });
-  });
-  console.log('Telegram Bot is active...');
+    console.log('Telegram Bot is active...');
+  } else {
+    console.log('TELEGRAM_BOT_TOKEN is not set. Telegram bot is disabled.');
+  }
 } catch(e) {
   console.log('Failed to start Telegram Bot:', e.message);
 }
