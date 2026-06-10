@@ -24,6 +24,18 @@ function App() {
     setLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), message }]);
   };
 
+  // Auto-fill URL if opened from the browser extension (?autourl=...)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const autoUrl = params.get('autourl');
+    if (autoUrl) {
+      setUrl(decodeURIComponent(autoUrl));
+      addLog('URL detected from browser extension. Click "Fetch Playlist" to continue.');
+      // Clean the URL bar without reloading
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, []);
+
   useEffect(() => {
     if (terminalRef.current) {
       terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
