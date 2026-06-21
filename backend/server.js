@@ -558,7 +558,8 @@ app.use((req, res) => {
   res.sendFile(path.join(__dirname, '../frontend/dist/index.html'));
 });
 
-// --- Telegram Bot Integration ---
+// --- Telegram Bot Integration (Disabled due to regional ban / IP blocks) ---
+/*
 const TelegramBot = require('node-telegram-bot-api');
 const telegramToken = process.env.TELEGRAM_BOT_TOKEN;
 try {
@@ -585,6 +586,7 @@ try {
 } catch(e) {
   console.log('Failed to start Telegram Bot:', e.message);
 }
+*/
 // --------------------------------
 
 const PORT = process.env.PORT || 3000;
