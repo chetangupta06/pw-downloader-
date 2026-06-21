@@ -563,7 +563,8 @@ const TelegramBot = require('node-telegram-bot-api');
 const telegramToken = process.env.TELEGRAM_BOT_TOKEN;
 try {
   if (telegramToken) {
-    const bot = new TelegramBot(telegramToken, { polling: true });
+    const bot = new TelegramBot(telegramToken, { polling: { interval: 3000 } });
+    bot.on('polling_error', (err) => console.log('Telegram polling issue:', err.code));
     bot.onText(/\/start/, (msg) => {
       const chatId = msg.chat.id;
       bot.sendMessage(chatId, 'Welcome to PW Downloader! Click the button below to start downloading your lectures.', {
