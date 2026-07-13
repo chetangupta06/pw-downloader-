@@ -61,8 +61,13 @@ const resolveUrl = (relative, base) => {
 };
 
 app.get('/api/parse', async (req, res) => {
-  const { url } = req.query;
+  let { url } = req.query;
   if (!url) return res.status(400).json({ error: 'URL is required' });
+
+  // AUTOMATIC DRM BYPASS: Convert DASH (.mpd) to HLS (.m3u8)
+  if (url.includes('.mpd')) {
+      url = url.replace('.mpd', '.m3u8');
+  }
 
   try {
     const urlObj = new URL(url);
@@ -109,7 +114,13 @@ app.get('/api/parse', async (req, res) => {
 });
 
 app.post('/api/download', async (req, res) => {
-  const { url } = req.body;
+  let { url } = req.body;
+  
+  // AUTOMATIC DRM BYPASS: Convert DASH (.mpd) to HLS (.m3u8)
+  if (url && url.includes('.mpd')) {
+      url = url.replace('.mpd', '.m3u8');
+  }
+
   const sessionId = Date.now().toString();
 
   const session = {
