@@ -235,5 +235,15 @@ document.getElementById('open-webapp').addEventListener('click', () => {
   window.close();
 });
 
+document.getElementById('btn-copy-url').addEventListener('click', () => {
+  if (detectedUrl) {
+    navigator.clipboard.writeText(detectedUrl);
+    const btn = document.getElementById('btn-copy-url');
+    const oldText = btn.textContent;
+    btn.textContent = '✅';
+    setTimeout(() => btn.textContent = oldText, 2000);
+  }
+});
+
 // --- Boot ---
 init();

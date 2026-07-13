@@ -240,7 +240,10 @@
         <div class="dot"></div>
         <span>PW Lecture Stream Detected!</span>
       </div>
-      <div class="url-display" id="url-display">–</div>
+      <div style="display:flex; gap:6px;">
+        <div class="url-display" id="url-display" style="flex:1;">–</div>
+        <button id="btn-copy-url" class="btn btn-ghost" style="padding:9px 12px; flex-shrink:0;" title="Copy URL">📋</button>
+      </div>
       <button class="btn btn-primary" id="btn-fetch">Fetch Quality Options</button>
       <button class="btn btn-ghost" id="btn-clear">Clear &amp; Scan Again</button>
     </div>
