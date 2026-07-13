@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>PW Lecture Downloader</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      width: 420px;
+      min-height: 300px;
+      background: #0d0b14;
+      color: #f3f4f6;
+      font-family: 'Inter', sans-serif;
+      overflow: hidden;
+    }
+
+    .header {
+      background: linear-gradient(135deg, #1e1b2e 0%, #0d0b14 100%);
+      border-bottom: 1px solid rgba(139, 92, 246, 0.2);
+      padding: 14px 18px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .logo {
+      width: 34px; height: 34px;
+      background: linear-gradient(135deg, #7c3aed, #3b82f6);
+      border-radius: 9px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 17px; flex-shrink: 0;
+      box-shadow: 0 0 14px rgba(124,58,237,0.4);
+    }
+    .header-text h1 { font-size: 13px; font-weight: 700; color: #fff; }
+    .header-text p  { font-size: 10px; color: #9ca3af; margin-top: 1px; }
+
+    .content {
+      padding: 18px;
+      display: flex; flex-direction: column; gap: 14px;
+    }
+
+    .state { display: none; flex-direction: column; gap: 12px; }
+    .state.active { display: flex; }
+
+    /* Waiting */
+    .waiting-icon { text-align:center; font-size:44px; animation:pulse 2s ease-in-out infinite; }
+    @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.7;transform:scale(.96)} }
+    .waiting-text { text-align:center; color:#9ca3af; font-size:12.5px; line-height:1.6; }
+    .waiting-text strong { color:#a78bfa; }
+    .tip-box {
+      background:rgba(139,92,246,.08); border:1px solid rgba(139,92,246,.2);
+      border-radius:10px; padding:11px 13px; font-size:11.5px; color:#d1d5db; line-height:1.6;
+    }
+    .tip-box .tip-title { color:#a78bfa; font-weight:600; margin-bottom:3px; display:block; }
+
+    /* Detected */
+    .detected-badge {
+      display:flex; align-items:center; gap:8px;
+      background:rgba(16,185,129,.1); border:1px solid rgba(16,185,129,.3);
+      border-radius:8px; padding:9px 13px; font-size:12px; color:#6ee7b7; font-weight:500;
+    }
+    .dot {
+      width:8px; height:8px; background:#10b981; border-radius:50%; flex-shrink:0;
+      box-shadow:0 0 6px #10b981; animation:blink 1.2s ease-in-out infinite;
+    }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.4} }
+    .url-display {
+      background:#1a1625; border:1px solid rgba(255,255,255,.07); border-radius:8px;
+      padding:9px 11px; font-size:10.5px; color:#9ca3af; font-family:monospace;
+      white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    }
+
+    /* Buttons */
+    .btn {
+      border:none; border-radius:10px; padding:11px 14px;
+      font-size:12.5px; font-weight:600; cursor:pointer;
+      transition:all .2s; font-family:'Inter',sans-serif; letter-spacing:.3px;
+    }
+    .btn:active { transform:scale(.97); }
+    .btn-primary {
+      background:linear-gradient(135deg,#7c3aed,#5b21b6); color:#fff;
+      box-shadow:0 4px 14px rgba(124,58,237,.35);
+    }
+    .btn-primary:hover { background:linear-gradient(135deg,#6d28d9,#4c1d95); }
+    .btn-primary:disabled { background:#374151; color:#6b7280; cursor:not-allowed; box-shadow:none; }
+    .btn-success {
+      background:linear-gradient(135deg,#059669,#047857); color:#fff;
+      box-shadow:0 4px 14px rgba(5,150,105,.35);
+    }
+    .btn-success:hover { background:linear-gradient(135deg,#047857,#065f46); }
+    .btn-success:disabled { background:#374151; color:#6b7280; cursor:not-allowed; box-shadow:none; }
+    .btn-save {
+      background:linear-gradient(135deg,#2563eb,#1d4ed8); color:#fff;
+      box-shadow:0 4px 14px rgba(37,99,235,.4);
+      animation: glowPulse 1.5s ease-in-out infinite;
+    }
+    .btn-save:hover { background:linear-gradient(135deg,#1d4ed8,#1e40af); }
+    @keyframes glowPulse {
+      0%,100% { box-shadow:0 4px 14px rgba(37,99,235,.4); }
+      50% { box-shadow:0 4px 24px rgba(37,99,235,.7); }
+    }
+    .btn-ghost {
+      background:rgba(255,255,255,.05); color:#9ca3af;
+      border:1px solid rgba(255,255,255,.08);
+    }
+    .btn-ghost:hover { background:rgba(255,255,255,.09); color:#d1d5db; }
+
+    /* Quality */
+    .quality-section label {
+      display:block; font-size:11px; font-weight:600; color:#9ca3af;
+      text-transform:uppercase; letter-spacing:.8px; margin-bottom:7px;
+    }
+    .quality-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:5px; }
+    .quality-btn {
+      background:#1a1625; border:1.5px solid rgba(255,255,255,.08); color:#9ca3af;
+      border-radius:8px; padding:9px 4px; font-size:12px; font-weight:700;
+      cursor:pointer; transition:all .18s; font-family:'Inter',sans-serif; text-align:center;
+    }
+    .quality-btn:hover { border-color:#7c3aed; color:#a78bfa; background:rgba(124,58,237,.1); }
+    .quality-btn.selected {
+      background:linear-gradient(135deg,#7c3aed,#5b21b6); border-color:#7c3aed;
+      color:#fff; box-shadow:0 2px 8px rgba(124,58,237,.4);
+    }
+
+    /* Loading spinner */
+    .spinner {
+      width:16px; height:16px;
+      border:2px solid rgba(255,255,255,.2); border-top-color:#a78bfa;
+      border-radius:50%; animation:spin .7s linear infinite;
+      display:inline-block; vertical-align:middle; margin-right:7px;
+    }
+    @keyframes spin { to { transform:rotate(360deg); } }
+
+    /* ====== DOWNLOAD PROGRESS STATE ====== */
+    .progress-header {
+      display:flex; align-items:center; justify-content:space-between;
+    }
+    .progress-header .label { font-size:12px; font-weight:600; color:#d1d5db; }
+    .progress-header .percent { font-size:14px; font-weight:800; color:#a78bfa; }
+
+    .progress-bar-track {
+      height:8px; background:#1e1b2e; border-radius:99px;
+      overflow:hidden; border:1px solid rgba(255,255,255,.06);
+    }
+    .progress-bar-fill {
+      height:100%;
+      background: linear-gradient(90deg, #7c3aed, #3b82f6);
+      border-radius:99px;
+      width:0%;
+      transition:width .4s ease;
+      box-shadow:0 0 8px rgba(124,58,237,.6);
+    }
+
+    .stats-row {
+      display:grid; grid-template-columns:1fr 1fr 1fr;
+      gap:6px;
+    }
+    .stat-box {
+      background:#1a1625; border:1px solid rgba(255,255,255,.06);
+      border-radius:8px; padding:8px 6px; text-align:center;
+    }
+    .stat-box .val { font-size:14px; font-weight:800; color:#f3f4f6; }
+    .stat-box .val.blue { color:#60a5fa; }
+    .stat-box .val.green { color:#34d399; }
+    .stat-box .lbl { font-size:9px; font-weight:700; color:#6b7280; text-transform:uppercase; letter-spacing:.6px; margin-top:2px; }
+
+    .mini-terminal {
+      background:#0f0f13;
+      border:1px solid rgba(255,255,255,.06);
+      border-top:2px solid #7c3aed;
+      border-radius:8px;
+      padding:10px;
+      height:110px;
+      overflow-y:auto;
+      font-family:'Consolas','Monaco',monospace;
+      font-size:10px;
+      color:#d1d5db;
+      display:flex;
+      flex-direction:column;
+      gap:3px;
+    }
+    .mini-terminal::-webkit-scrollbar { width:4px; }
+    .mini-terminal::-webkit-scrollbar-thumb { background:#2d2d3d; border-radius:4px; }
+    .log-line { display:flex; gap:5px; }
+    .log-time { color:#4b5563; flex-shrink:0; }
+    .log-msg  { color:#e5e7eb; }
+    .log-msg.ok  { color:#34d399; }
+    .log-msg.err { color:#f87171; }
+
+    /* Error */
+    .error-box {
+      background:rgba(239,68,68,.1); border:1px solid rgba(239,68,68,.3);
+      border-radius:8px; padding:12px 13px; font-size:11.5px; color:#fca5a5; line-height:1.5;
+      white-space: pre-line;
+    }
+
+    /* Footer */
+    .footer {
+      border-top:1px solid rgba(255,255,255,.05);
+      padding:9px 18px;
+      display:flex; justify-content:space-between; align-items:center;
+    }
+    .footer-link { font-size:10.5px; color:#6b7280; cursor:pointer; transition:color .2s; }
+    .footer-link:hover { color:#a78bfa; }
+    .footer-brand { font-size:10.5px; color:#4b5563; font-weight:500; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="logo">📥</div>
+    <div class="header-text">
+      <h1>PW Lecture Downloader</h1>
+      <p>Detect &amp; download PW lectures in HD</p>
+    </div>
+  </div>
+
+  <div class="content">
+
+    <!-- STATE 1: Waiting -->
+    <div class="state active" id="state-waiting">
+      <div class="waiting-icon">🔍</div>
+      <p class="waiting-text">
+        No video detected yet.<br/>
+        <strong>Open a PW lecture</strong> on any platform and play it.<br/>
+        The extension will automatically detect the stream!
+      </p>
+      <div class="tip-box">
+        <span class="tip-title">💡 Supported Platforms</span>
+        PW App · PW Website · Any website streaming from pw.live or penpencil.co
+      </div>
+    </div>
+
+    <!-- STATE 2: Detected -->
+    <div class="state" id="state-detected">
+      <div class="detected-badge">
+        <div class="dot"></div>
+        <span>PW Lecture Stream Detected!</span>
+      </div>
+      <div class="url-display" id="url-display">–</div>
+      <button class="btn btn-primary" id="btn-fetch">Fetch Quality Options</button>
+      <button class="btn btn-ghost" id="btn-clear">Clear &amp; Scan Again</button>
+    </div>
+
+    <!-- STATE 3: Loading qualities -->
+    <div class="state" id="state-loading">
+      <div style="text-align:center;padding:20px 0;">
+        <div class="spinner"></div>
+        <span style="color:#9ca3af;font-size:12.5px;">Fetching quality options...</span>
+      </div>
+    </div>
+
+    <!-- STATE 4: Quality selection -->
+    <div class="state" id="state-quality">
+      <div class="detected-badge">
+        <div class="dot"></div>
+        <span id="quality-count">Found 4 qualities</span>
+      </div>
+      <div class="quality-section">
+        <label>Select Video Quality</label>
+        <div class="quality-grid" id="quality-grid"></div>
+      </div>
+      <button class="btn btn-success" id="btn-download" disabled>
+        Download in Selected Quality 🚀
+      </button>
+      <button class="btn btn-ghost" id="btn-back">← Back</button>
+    </div>
+
+    <!-- STATE 5: Downloading -->
+    <div class="state" id="state-downloading">
+      <div class="progress-header">
+        <span class="label" id="dl-status">⬇️ Downloading...</span>
+        <span class="percent" id="dl-percent">0%</span>
+      </div>
+      <div class="progress-bar-track">
+        <div class="progress-bar-fill" id="dl-bar"></div>
+      </div>
+      <div class="stats-row">
+        <div class="stat-box">
+          <div class="val" id="stat-segs">0</div>
+          <div class="lbl">Segments</div>
+        </div>
+        <div class="stat-box">
+          <div class="val blue" id="stat-mb">0.00</div>
+          <div class="lbl">Downloaded MB</div>
+        </div>
+        <div class="stat-box">
+          <div class="val green" id="stat-est">N/A</div>
+          <div class="lbl">Est. Total</div>
+        </div>
+      </div>
+      <div class="mini-terminal" id="dl-terminal">
+        <div class="log-line"><span class="log-time">[...]</span><span class="log-msg">Initializing download engine...</span></div>
+      </div>
+      <button class="btn btn-save" id="btn-save" style="display:none;">
+        💾 Save MP4 File
+      </button>
+    </div>
+
+    <!-- STATE 6: Error -->
+    <div class="state" id="state-error">
+      <div class="error-box" id="error-message">Something went wrong.</div>
+      <button class="btn btn-ghost" id="btn-retry">Try Again</button>
+    </div>
+
+  </div>
+
+  <div class="footer">
+    <span class="footer-link" id="open-webapp">Open Web App ↗</span>
+    <span class="footer-brand">PW Downloader v1.0</span>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
