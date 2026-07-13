@@ -74,6 +74,11 @@ app.get('/api/parse', async (req, res) => {
       url = url.replace('.mpd', '.m3u8');
   }
 
+  // BYPASS CLOUDFLARE: If the URL uses proxy.pwthor.live, strip it and use direct Cloudfront URL
+  if (url.includes('proxy.pwthor.live/play/')) {
+      url = 'https://' + url.split('proxy.pwthor.live/play/')[1];
+  }
+
   try {
     const urlObj = new URL(url);
     if (urlObj.pathname.match(/\/(\d+)\.mp4$/)) {
