@@ -50,6 +50,11 @@ const log = (session, message) => {
 
 // Helper to preserve query parameters
 const resolveUrl = (relative, base) => {
+    // FIX for Heroku player returning URLs without https://
+    if (relative && !relative.startsWith('http') && (relative.includes('.cloudfront.net') || relative.includes('.penpencil.co') || relative.includes('.pw.live'))) {
+        relative = 'https://' + relative;
+    }
+    
     const baseUrlObj = new URL(base);
     const resolved = new URL(relative, base);
     for (const [key, value] of baseUrlObj.searchParams.entries()) {
