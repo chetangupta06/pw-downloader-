@@ -12,6 +12,8 @@
     /cdn\.penpencil\.co\/.*master\.mpd/i,
     /cloudfront\.net\/.*master\.m3u8/i,
     /cloudfront\.net\/.*master\.mpd/i,
+    /testwave\.cc\/.*master\.m3u8/i,
+    /testwave\.cc\/.*master\.mpd/i,
   ];
 
   function checkAndReport(url) {

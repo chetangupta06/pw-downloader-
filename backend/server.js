@@ -51,7 +51,7 @@ const log = (session, message) => {
 // Helper to preserve query parameters
 const resolveUrl = (relative, base) => {
     // FIX for Heroku player returning URLs without https://
-    if (relative && !relative.startsWith('http') && (relative.includes('.cloudfront.net') || relative.includes('.penpencil.co') || relative.includes('.pw.live'))) {
+    if (relative && !relative.startsWith('http') && (relative.includes('.cloudfront.net') || relative.includes('.penpencil.co') || relative.includes('.pw.live') || relative.includes('.testwave.cc'))) {
         relative = 'https://' + relative;
     }
     
