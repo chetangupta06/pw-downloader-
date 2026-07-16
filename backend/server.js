@@ -23,6 +23,54 @@ app.use(express.static(path.join(__dirname, '../frontend/dist')));
 
 const activeSessions = new Map();
 
+// --- PW API Token Proxy System ---
+let pwMasterToken = '';
+let tokenExpiry = 0;
+
+async function getMasterToken() {
+    if (Date.now() < tokenExpiry && pwMasterToken) {
+        return pwMasterToken;
+    }
+    try {
+        console.log('Fetching new master token from proxy...');
+        const res = await axios.get('https://vidcloud.eu.org/generate_token.php');
+        if (res.data && res.data.access_token) {
+            pwMasterToken = res.data.access_token;
+            // Refresh 15 mins before expiry to be safe (token usually lasts ~1 hour)
+            tokenExpiry = Date.now() + (45 * 60 * 1000); 
+            console.log('Master token refreshed successfully.');
+            return pwMasterToken;
+        }
+    } catch (e) {
+        console.error('Failed to fetch master token:', e.message);
+    }
+    return pwMasterToken;
+}
+
+app.all('/api/pw/*', async (req, res) => {
+    try {
+        const token = await getMasterToken();
+        const targetUrl = 'https://api.penpencil.co' + req.originalUrl.replace('/api/pw', '');
+        const response = await axios({
+            method: req.method,
+            url: targetUrl,
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Client-Id': '5eb393ee95fab7468a79d189' // General PW client id
+            },
+            data: Object.keys(req.body).length ? req.body : undefined
+        });
+        res.status(response.status).json(response.data);
+    } catch (error) {
+        console.error('Proxy Error:', error.message);
+        const status = error.response ? error.response.status : 500;
+        const data = error.response ? error.response.data : { error: 'Proxy request failed' };
+        res.status(status).json(data);
+    }
+});
+// ---------------------------------
+
 // Ensure temp directory exists
 const TMP_DIR = path.join(__dirname, 'tmp');
 if (!fs.existsSync(TMP_DIR)) {
