@@ -48,6 +48,7 @@ async function init() {
       detectedUrl = resp.url;
       detectedTitle = resp.title || 'PW_Lecture';
       document.getElementById('url-display').textContent = resp.url;
+      document.getElementById('lecture-title-input').value = detectedTitle;
       showState('state-detected');
     } else {
       showState('state-waiting');
@@ -122,10 +123,11 @@ async function startDownload() {
 
   try {
     // Step 1: Kick off download job on the backend
+    const currentTitle = document.getElementById('lecture-title-input').value.trim() || 'PW_Lecture';
     const startResp = await fetch(`${HF_BACKEND}/api/download`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: selectedQualityUrl })
+      body: JSON.stringify({ url: selectedQualityUrl, title: currentTitle })
     });
     if (!startResp.ok) throw new Error(`Backend error: ${startResp.status}`);
     const { sessionId } = await startResp.json();
@@ -234,9 +236,10 @@ document.getElementById('btn-retry').addEventListener('click', () => {
 });
 document.getElementById('open-webapp').addEventListener('click', () => {
   let targetUrl = HF_BACKEND;
+  const currentTitle = document.getElementById('lecture-title-input').value.trim() || detectedTitle;
   if (detectedUrl) {
     targetUrl += `?autourl=${encodeURIComponent(detectedUrl)}`;
-    if (detectedTitle) targetUrl += `&title=${encodeURIComponent(detectedTitle)}`;
+    if (currentTitle) targetUrl += `&title=${encodeURIComponent(currentTitle)}`;
   }
   chrome.tabs.create({ url: targetUrl });
   window.close();
