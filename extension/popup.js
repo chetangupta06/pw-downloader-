@@ -1,5 +1,5 @@
 // PW Lecture Downloader - Popup Logic
-const HF_BACKEND = 'https://chetangupta06-pw-downloader.hf.space';
+const HF_BACKEND = 'http://localhost:3000';
 
 let detectedUrl = null;
 let selectedQualityUrl = null;

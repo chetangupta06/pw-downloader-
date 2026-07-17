@@ -18,8 +18,14 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Serve static frontend files for Monorepo deployment
-app.use(express.static(path.join(__dirname, '../frontend/dist')));
+// Serve static files from the frontend dist directory
+app.use(express.static(path.join(__dirname, '../frontend/dist'), {
+    setHeaders: (res, path) => {
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+        res.setHeader('Expires', '-1');
+        res.setHeader('Pragma', 'no-cache');
+    }
+}));
 
 const activeSessions = new Map();
 
@@ -47,7 +53,7 @@ async function getMasterToken() {
     return pwMasterToken;
 }
 
-app.all('/api/pw/*', async (req, res) => {
+app.use('/api/pw', async (req, res) => {
     try {
         const token = await getMasterToken();
         const targetUrl = 'https://api.penpencil.co' + req.originalUrl.replace('/api/pw', '');
@@ -59,7 +65,7 @@ app.all('/api/pw/*', async (req, res) => {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 'Client-Id': '5eb393ee95fab7468a79d189' // General PW client id
             },
-            data: Object.keys(req.body).length ? req.body : undefined
+            data: Object.keys(req.body || {}).length ? req.body : undefined
         });
         res.status(response.status).json(response.data);
     } catch (error) {
