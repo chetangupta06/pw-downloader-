@@ -231,7 +231,8 @@ document.getElementById('btn-retry').addEventListener('click', () => {
   else showState('state-waiting');
 });
 document.getElementById('open-webapp').addEventListener('click', () => {
-  chrome.tabs.create({ url: HF_BACKEND });
+  const targetUrl = detectedUrl ? `${HF_BACKEND}?autourl=${encodeURIComponent(detectedUrl)}` : HF_BACKEND;
+  chrome.tabs.create({ url: targetUrl });
   window.close();
 });
 
