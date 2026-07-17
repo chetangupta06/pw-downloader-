@@ -49,7 +49,13 @@ chrome.webRequest.onBeforeRequest.addListener(
         '$1/hls/720/main.m3u8'
       );
 
-      detectedUrls[tabId] = { url: finalUrl, timestamp: Date.now() };
+      detectedUrls[tabId] = { url: finalUrl, title: 'PW_Lecture', timestamp: Date.now() };
+
+      chrome.tabs.get(tabId, (tab) => {
+        if (!chrome.runtime.lastError && tab && tab.title) {
+          detectedUrls[tabId].title = tab.title.replace(/(\s*-\s*Physics Wallah\s*|\s*\|\s*Physics Wallah\s*)/gi, '').trim() || 'PW_Lecture';
+        }
+      });
 
       // Update badge to alert user
       chrome.action.setBadgeText({ text: '1', tabId });
@@ -71,7 +77,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'GET_URL') {
     const tabId = message.tabId;
     const data = detectedUrls[tabId];
-    sendResponse({ url: data ? data.url : null });
+    sendResponse({ url: data ? data.url : null, title: data ? data.title : null });
   }
 
   if (message.type === 'CLEAR_URL') {

@@ -4,6 +4,7 @@ import './App.css';
 
 function App() {
   const [url, setUrl] = useState('');
+  const [videoTitle, setVideoTitle] = useState('Lecture');
   const [logs, setLogs] = useState([{ time: new Date().toLocaleTimeString(), message: 'System initialized. Waiting for input...' }]);
   const [qualitiesCount, setQualitiesCount] = useState(0);
   const [qualitiesList, setQualitiesList] = useState([]);
@@ -28,8 +29,10 @@ function App() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const autoUrl = params.get('autourl');
+    const autoTitle = params.get('title');
     if (autoUrl) {
       setUrl(decodeURIComponent(autoUrl));
+      if (autoTitle) setVideoTitle(decodeURIComponent(autoTitle));
       addLog('URL detected from browser extension. Click "Fetch Playlist" to continue.');
       // Clean the URL bar without reloading
       window.history.replaceState({}, '', window.location.pathname);
@@ -142,7 +145,7 @@ function App() {
       const response = await fetch('/api/download', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: selectedQualityUrl || url })
+        body: JSON.stringify({ url: selectedQualityUrl || url, title: videoTitle })
       });
       
       const data = await response.json();
@@ -226,6 +229,20 @@ function App() {
                 <Info size={18} />
               </div>
             </div>
+          </div>
+
+          <div className="input-group" style={{ marginTop: '10px' }}>
+            <label className="input-label">
+              Lecture Title
+            </label>
+            <input 
+              type="text" 
+              className="url-input" 
+              placeholder="e.g. Current Electricity 01"
+              value={videoTitle}
+              onChange={(e) => setVideoTitle(e.target.value)}
+              disabled={isDownloading}
+            />
           </div>
 
             <button 

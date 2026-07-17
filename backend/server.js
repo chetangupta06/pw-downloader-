@@ -124,7 +124,7 @@ app.get('/api/parse', async (req, res) => {
 });
 
 app.post('/api/download', async (req, res) => {
-  let { url } = req.body;
+  let { url, title } = req.body;
   
   // AUTOMATIC DRM BYPASS: Convert DASH (.mpd) to HLS (.m3u8)
   if (url && url.includes('.mpd')) {
@@ -142,6 +142,7 @@ app.post('/api/download', async (req, res) => {
     id: sessionId,
     res: null, // For SSE connection
     url: url,
+    title: title || 'PW_Lecture',
     status: 'downloading'
   };
   activeSessions.set(sessionId, session);
@@ -347,7 +348,7 @@ async function processDownload(sessionId, m3u8Url) {
        });
        
        log(session, 'Merge completed successfully.');
-       sendEvent(session, 'complete', { fileUrl: `/api/download_file?sessionId=${sessionId}` });
+       sendEvent(session, 'complete', { fileUrl: `/api/download_file?sessionId=${sessionId}&format=mp4&title=${encodeURIComponent(session.title)}` });
        fs.rmSync(sessionDir, { recursive: true, force: true });
      } catch (err) {
        throw new Error(`Merge failed: ${err.message}`);
@@ -545,7 +546,7 @@ async function processDownload(sessionId, m3u8Url) {
         ffmpeg.on('close', (code) => {
             if (code === 0) {
                 log(session, 'MP4 Remux successful! Ready to save.');
-                sendEvent(session, 'complete', { fileUrl: `/api/download_file?sessionId=${sessionId}&format=mp4` });
+                sendEvent(session, 'complete', { fileUrl: `/api/download_file?sessionId=${sessionId}&format=mp4&title=${encodeURIComponent(session.title)}` });
                 try { fs.rmSync(sessionDir, { recursive: true, force: true }); } catch (e) {}
                 resolve();
             } else {
@@ -569,11 +570,13 @@ async function processDownload(sessionId, m3u8Url) {
 }
 
 app.get('/api/download_file', (req, res) => {
-  const { sessionId, format = 'ts' } = req.query;
+  const { sessionId, format = 'ts', title } = req.query;
   const filePath = path.join(OUT_DIR, `${sessionId}.${format}`);
   
   if (fs.existsSync(filePath)) {
-    res.download(filePath, `lecture.${format}`);
+    let safeTitle = title ? title.replace(/[^a-zA-Z0-9 _-]/g, '').trim() : 'lecture';
+    if (!safeTitle) safeTitle = 'lecture';
+    res.download(filePath, `${safeTitle}.${format}`);
   } else {
     res.status(404).send('File not found');
   }

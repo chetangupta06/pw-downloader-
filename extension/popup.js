@@ -2,6 +2,7 @@
 const HF_BACKEND = 'https://chetangupta06-pw-downloader.hf.space';
 
 let detectedUrl = null;
+let detectedTitle = null;
 let selectedQualityUrl = null;
 let qualities = [];
 let downloadFileUrl = null;
@@ -45,6 +46,7 @@ async function init() {
   chrome.runtime.sendMessage({ type: 'GET_URL', tabId: tab.id }, (resp) => {
     if (resp && resp.url) {
       detectedUrl = resp.url;
+      detectedTitle = resp.title || 'PW_Lecture';
       document.getElementById('url-display').textContent = resp.url;
       showState('state-detected');
     } else {
@@ -231,7 +233,11 @@ document.getElementById('btn-retry').addEventListener('click', () => {
   else showState('state-waiting');
 });
 document.getElementById('open-webapp').addEventListener('click', () => {
-  const targetUrl = detectedUrl ? `${HF_BACKEND}?autourl=${encodeURIComponent(detectedUrl)}` : HF_BACKEND;
+  let targetUrl = HF_BACKEND;
+  if (detectedUrl) {
+    targetUrl += `?autourl=${encodeURIComponent(detectedUrl)}`;
+    if (detectedTitle) targetUrl += `&title=${encodeURIComponent(detectedTitle)}`;
+  }
   chrome.tabs.create({ url: targetUrl });
   window.close();
 });
