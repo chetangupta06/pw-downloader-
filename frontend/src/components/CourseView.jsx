@@ -33,23 +33,18 @@ export default function CourseView({ batch, onBack, onPlayVideo }) {
         setLoadingTopics(true);
         const res = await fetch('/api/pw/v1/batches/' + batch._id + '/subject/' + selectedSubject._id + '/topics?page=1');
         const data = await res.json();
-        if (data && data.data) {
-          setTopics(data.data);
-          if (data.data.length > 0) {
-            setSelectedTopic(data.data[0]);
-          }
-        }
+        if (data && data.data) setTopics(data.data);
       } catch (err) { console.error(err); } finally { setLoadingTopics(false); }
     };
     fetchTopics();
   }, [selectedSubject, batch._id]);
 
   useEffect(() => {
-    if (!selectedSubject || !selectedTopic) return;
+    if (!selectedSubject) return;
     const fetchContents = async () => {
       try {
         setLoadingContents(true);
-        const topicFilter = '&topicId=' + selectedTopic._id;
+        const topicFilter = selectedTopic ? '&topicId=' + selectedTopic._id : '';
         const res = await fetch('/api/pw/v2/batches/' + batch._id + '/subject/' + selectedSubject._id + '/contents?page=1&contentType=exercises-notes-video-videos-peertopeer-mcq-subjects-pdf-dpp-html' + topicFilter);
         const data = await res.json();
         if (data && data.data) setContents(data.data);
@@ -74,9 +69,9 @@ export default function CourseView({ batch, onBack, onPlayVideo }) {
           <div className="bg-gray-800/50 backdrop-blur-sm border border-gray-700/50 rounded-2xl p-4">
             <h3 className="text-lg font-semibold text-white mb-4">Subjects</h3>
             {loading ? <Loader2 className="w-6 h-6 text-blue-500 animate-spin mx-auto" /> : (
-              <div className="space-y-2 max-h-64 overflow-y-auto pr-2 custom-scrollbar">
+              <div className="space-y-2 max-h-64 overflow-y-auto pr-2">
                 {subjects.map(sub => (
-                  <button key={sub._id} onClick={() => { setSelectedSubject(sub); setSelectedTopic(null); setContents([]); }} className={`w-full text-left px-4 py-3 rounded-xl transition-all ${selectedSubject?._id === sub._id ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-gray-700/50 text-gray-300'}`}>
+                  <button key={sub._id} onClick={() => { setSelectedSubject(sub); setSelectedTopic(null); }} className={"w-full text-left px-4 py-3 rounded-xl transition-all "}>
                     {sub.subject}
                   </button>
                 ))}
@@ -87,10 +82,10 @@ export default function CourseView({ batch, onBack, onPlayVideo }) {
             <div className="bg-gray-800/50 backdrop-blur-sm border border-gray-700/50 rounded-2xl p-4">
               <h3 className="text-lg font-semibold text-white mb-4">Chapters</h3>
               {loadingTopics ? <Loader2 className="w-6 h-6 text-blue-500 animate-spin mx-auto" /> : (
-                <div className="space-y-2 max-h-96 overflow-y-auto pr-2 custom-scrollbar">
-                  {topics.length === 0 && <div className="text-gray-500 text-sm text-center py-4">No chapters yet.</div>}
+                <div className="space-y-2 max-h-96 overflow-y-auto pr-2">
+                  <button onClick={() => setSelectedTopic(null)} className={"w-full text-left px-4 py-3 rounded-xl transition-all "}>All Chapters</button>
                   {topics.map(topic => (
-                    <button key={topic._id} onClick={() => setSelectedTopic(topic)} className={`w-full text-left px-4 py-3 rounded-xl transition-all ${selectedTopic?._id === topic._id ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-gray-700/50 text-gray-300'}`}>
+                    <button key={topic._id} onClick={() => setSelectedTopic(topic)} className={"w-full text-left px-4 py-3 rounded-xl transition-all "}>
                       {topic.name}
                     </button>
                   ))}
@@ -119,12 +114,7 @@ export default function CourseView({ batch, onBack, onPlayVideo }) {
                     </div>
                     <div className="flex gap-2">
                       {(content.contentType === 'video' || content.contentType === 'videos') && content.url && (
-                        <button onClick={() => {
-                          let finalUrl = content.url;
-                          finalUrl = finalUrl.replace(/\.mpd/gi, '.m3u8');
-                          finalUrl = finalUrl.replace(/(https:\/\/[^\/]+\/[a-fA-F0-9\-]+)\/dash\/.*?\.mp4(\?.*)?/gi, '$1/master.m3u8$2');
-                          onPlayVideo(finalUrl);
-                        }} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors flex items-center gap-2">
+                        <button onClick={() => onPlayVideo(content.url)} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors flex items-center gap-2">
                           <PlayCircle className="w-4 h-4" /> Play
                         </button>
                       )}
