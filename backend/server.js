@@ -74,9 +74,9 @@ app.get('/api/parse', async (req, res) => {
       url = url.replace('.mpd', '.m3u8');
   }
 
-  // BYPASS CLOUDFLARE: If the URL uses proxy.pwthor.live, strip it and use direct Cloudfront URL
-  if (url.includes('proxy.pwthor.live/play/')) {
-      url = 'https://' + url.split('proxy.pwthor.live/play/')[1];
+  // BYPASS CLOUDFLARE: If the URL uses a proxy like proxy.pwthor.live/play/ or streamvideo.co.in/play/, strip it
+  if (url.match(/^https?:\/\/[^\/]+\/play\/(d1d34p8vz63oiq\.cloudfront\.net.*)/i)) {
+      url = url.replace(/^https?:\/\/[^\/]+\/play\/(d1d34p8vz63oiq\.cloudfront\.net.*)/i, 'https://$1');
   }
 
   try {
@@ -129,6 +129,11 @@ app.post('/api/download', async (req, res) => {
   // AUTOMATIC DRM BYPASS: Convert DASH (.mpd) to HLS (.m3u8)
   if (url && url.includes('.mpd')) {
       url = url.replace('.mpd', '.m3u8');
+  }
+
+  // BYPASS CLOUDFLARE PROXY for downloads too
+  if (url && url.match(/^https?:\/\/[^\/]+\/play\/(d1d34p8vz63oiq\.cloudfront\.net.*)/i)) {
+      url = url.replace(/^https?:\/\/[^\/]+\/play\/(d1d34p8vz63oiq\.cloudfront\.net.*)/i, 'https://$1');
   }
 
   const sessionId = Date.now().toString();
