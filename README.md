@@ -1,3 +1,12 @@
+---
+title: PW Downloader
+emoji: 📥
+colorFrom: blue
+colorTo: purple
+sdk: docker
+app_port: 7860
+---
+
 # PW Lecture Downloader
 
 A powerful, robust, and highly-automated system for detecting, bypassing protections, and downloading Physics Wallah (PW) lecture videos in original HD quality.
