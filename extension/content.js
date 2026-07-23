@@ -14,6 +14,8 @@
     /cloudfront\.net\/.*master\.mpd/i,
     /testwave\.cc\/.*master\.m3u8/i,
     /testwave\.cc\/.*master\.mpd/i,
+    // Universal Match: Any master playlist with an AWS Policy/Signature (catches ALL new proxy domains)
+    /master\.(m3u8|mpd).*(Policy=|Signature=)/i,
   ];
 
   function checkAndReport(url) {
