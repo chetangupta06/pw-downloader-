@@ -65,6 +65,38 @@ const resolveUrl = (relative, base) => {
     return resolved.href;
 };
 
+// Universal Proxy Bypass: Extracts the true CDN host directly from the AWS Policy!
+const bypassCloudflareProxy = (url) => {
+    if (!url) return url;
+    
+    // 1. Legacy hardcoded bypass
+    if (url.match(/^https?:\/\/[^\/]+\/play\/(d1d34p8vz63oiq\.cloudfront\.net.*)/i)) {
+        url = url.replace(/^https?:\/\/[^\/]+\/play\/(d1d34p8vz63oiq\.cloudfront\.net.*)/i, 'https://$1');
+    }
+    
+    // 2. Dynamic AWS Policy decoding bypass (Immune to any new proxy domains!)
+    try {
+        const urlObj = new URL(url);
+        const policyStr = urlObj.searchParams.get('Policy');
+        if (policyStr) {
+            const decoded = Buffer.from(policyStr, 'base64').toString('utf8');
+            const policyObj = JSON.parse(decoded);
+            const resource = policyObj.Statement[0].Resource;
+            const resourceUrl = new URL(resource.replace('/*', ''));
+            
+            if (urlObj.host !== resourceUrl.host) {
+                console.log(`[Proxy Bypass] Swapping proxy host (${urlObj.host}) for real CDN host (${resourceUrl.host})`);
+                urlObj.host = resourceUrl.host;
+                url = urlObj.href;
+            }
+        }
+    } catch (e) {
+        // Ignored
+    }
+    
+    return url;
+};
+
 app.get('/api/parse', async (req, res) => {
   let { url } = req.query;
   if (!url) return res.status(400).json({ error: 'URL is required' });
@@ -74,10 +106,8 @@ app.get('/api/parse', async (req, res) => {
       url = url.replace('.mpd', '.m3u8');
   }
 
-  // BYPASS CLOUDFLARE: If the URL uses a proxy like proxy.pwthor.live/play/ or streamvideo.co.in/play/, strip it
-  if (url.match(/^https?:\/\/[^\/]+\/play\/(d1d34p8vz63oiq\.cloudfront\.net.*)/i)) {
-      url = url.replace(/^https?:\/\/[^\/]+\/play\/(d1d34p8vz63oiq\.cloudfront\.net.*)/i, 'https://$1');
-  }
+  // UNIVERSAL CLOUDFLARE BYPASS
+  url = bypassCloudflareProxy(url);
 
   try {
     const urlObj = new URL(url);
@@ -131,10 +161,8 @@ app.post('/api/download', async (req, res) => {
       url = url.replace('.mpd', '.m3u8');
   }
 
-  // BYPASS CLOUDFLARE PROXY for downloads too
-  if (url && url.match(/^https?:\/\/[^\/]+\/play\/(d1d34p8vz63oiq\.cloudfront\.net.*)/i)) {
-      url = url.replace(/^https?:\/\/[^\/]+\/play\/(d1d34p8vz63oiq\.cloudfront\.net.*)/i, 'https://$1');
-  }
+  // UNIVERSAL CLOUDFLARE PROXY BYPASS
+  url = bypassCloudflareProxy(url);
 
   const sessionId = Date.now().toString();
 
