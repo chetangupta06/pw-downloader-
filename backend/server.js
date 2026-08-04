@@ -79,7 +79,10 @@ const bypassCloudflareProxy = (url) => {
         const urlObj = new URL(url);
         const policyStr = urlObj.searchParams.get('Policy');
         if (policyStr) {
-            const decoded = Buffer.from(policyStr, 'base64').toString('utf8');
+            let b64 = policyStr.replace(/-/g, '+').replace(/_/g, '/');
+            let decoded = Buffer.from(b64, 'base64').toString('utf8');
+            decoded = decoded.substring(0, decoded.lastIndexOf('}') + 1);
+            
             const policyObj = JSON.parse(decoded);
             const resource = policyObj.Statement[0].Resource;
             const resourceUrl = new URL(resource.replace('/*', ''));
@@ -87,11 +90,23 @@ const bypassCloudflareProxy = (url) => {
             if (urlObj.host !== resourceUrl.host) {
                 console.log(`[Proxy Bypass] Swapping proxy host (${urlObj.host}) for real CDN host (${resourceUrl.host})`);
                 urlObj.host = resourceUrl.host;
+                
+                // Also fix the path in case the proxy prepended its own routing path
+                const uuidMatch = resourceUrl.pathname.match(/^\/([^\/]+)/);
+                if (uuidMatch) {
+                    const uuid = uuidMatch[1];
+                    const originalPath = urlObj.pathname;
+                    const uuidIndex = originalPath.indexOf('/' + uuid);
+                    if (uuidIndex !== -1) {
+                        urlObj.pathname = originalPath.substring(uuidIndex);
+                    }
+                }
+                
                 url = urlObj.href;
             }
         }
     } catch (e) {
-        // Ignored
+        console.log('[Proxy Bypass] Failed to decode policy:', e.message);
     }
     
     return url;
