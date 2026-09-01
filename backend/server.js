@@ -387,33 +387,42 @@ async function processDownload(sessionId, m3u8Url) {
      
      log(session, `Total ${downloadedCount} segments downloaded. Merging files...`);
      
-     const outputPath = path.join(OUT_DIR, `${sessionId}.mp4`);
-     
      try {
-       const finalStream = fs.createWriteStream(outputPath);
-       
+       const outputPath = path.join(OUT_DIR, `${sessionId}.mp4`);
+       const ffmpeg = spawn('ffmpeg', [
+           '-y',
+           '-i', 'pipe:0',
+           '-c', 'copy',
+           outputPath
+       ]);
+
+       ffmpeg.stdin.on('error', (err) => {}); // ignore EPIPE
+
        const initPath = path.join(sessionDir, `seg_init.mp4`);
        if (fs.existsSync(initPath)) {
            const initData = await fs.promises.readFile(initPath);
-           const canWrite = finalStream.write(initData);
-           if (!canWrite) await new Promise(r => finalStream.once('drain', r));
+           const canWrite = ffmpeg.stdin.write(initData);
+           if (!canWrite) await new Promise(r => ffmpeg.stdin.once('drain', r));
        }
-       
+
        for (let j = startNum; j < i; j++) {
           const segmentPath = path.join(sessionDir, `seg_${j}.mp4`);
           if (fs.existsSync(segmentPath)) {
              const data = await fs.promises.readFile(segmentPath);
-             const canWrite = finalStream.write(data);
-             if (!canWrite) await new Promise(r => finalStream.once('drain', r));
+             const canWrite = ffmpeg.stdin.write(data);
+             if (!canWrite) await new Promise(r => ffmpeg.stdin.once('drain', r));
           }
        }
-       finalStream.end();
-       
+       ffmpeg.stdin.end();
+
        await new Promise((resolve, reject) => {
-           finalStream.on('finish', resolve);
-           finalStream.on('error', reject);
+           ffmpeg.on('close', (code) => {
+               if (code === 0) resolve();
+               else reject(new Error(`FFmpeg exited with code ${code}`));
+           });
+           ffmpeg.on('error', reject);
        });
-       
+
        log(session, 'Merge completed successfully.');
        sendEvent(session, 'complete', { fileUrl: `/api/download_file?sessionId=${sessionId}&format=mp4&title=${encodeURIComponent(session.title)}` });
        fs.rmSync(sessionDir, { recursive: true, force: true });
