@@ -290,8 +290,8 @@ async function processDownload(sessionId, m3u8Url) {
      let downloadedCount = 0;
      let consecutiveErrors = 0;
      
-     // Start from segment 1, or whatever number was in the URL
-     const startNum = parseInt(match[1], 10);
+     // Always start from 0, even if they pasted a link for segment 4 or 50.
+     const startNum = 0;
      let i = startNum;
 
      // Attempt to download the initialization segment first!
@@ -332,7 +332,7 @@ async function processDownload(sessionId, m3u8Url) {
      const CONCURRENCY = 150;
 
      const worker = async () => {
-         while (!hasHitEnd && consecutiveNotFound < 3) {
+         while (!hasHitEnd && consecutiveNotFound < 10) {
              const currentI = currentIndex++;
              const newPath = urlObj.pathname.replace(/\/(\d+)\.mp4$/, `/${currentI}.mp4`);
              const segmentUrl = urlObj.origin + newPath + urlObj.search;
@@ -365,7 +365,7 @@ async function processDownload(sessionId, m3u8Url) {
              } catch (error) {
                  if (error.response && (error.response.status === 403 || error.response.status === 404)) {
                      consecutiveNotFound++;
-                     if (consecutiveNotFound >= 3) {
+                     if (consecutiveNotFound >= 10) {
                          hasHitEnd = true;
                          log(session, `Hit end of stream near segment ${currentI}.`);
                      }
