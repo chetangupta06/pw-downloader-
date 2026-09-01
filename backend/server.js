@@ -394,7 +394,7 @@ async function processDownload(sessionId, m3u8Url) {
            '-i', 'pipe:0',
            '-c', 'copy',
            outputPath
-       ]);
+       ], { stdio: ['pipe', 'ignore', 'ignore'] });
 
        ffmpeg.stdin.on('error', (err) => {}); // ignore EPIPE
 
@@ -601,7 +601,7 @@ async function processDownload(sessionId, m3u8Url) {
         '-i', 'pipe:0', // Read from standard input
         '-c', 'copy', // Copy streams exactly without re-encoding
         outputMp4Path
-    ]);
+    ], { stdio: ['pipe', 'ignore', 'ignore'] });
     
     // We don't want the server to crash if ffmpeg throws a generic warning
     ffmpeg.stdin.on('error', (err) => {
