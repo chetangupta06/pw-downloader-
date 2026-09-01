@@ -116,6 +116,18 @@ app.get('/api/parse', async (req, res) => {
   let { url } = req.query;
   if (!url) return res.status(400).json({ error: 'URL is required' });
 
+  // EXTRACT VIDEO_URL FROM PROXY LINKS (like Vidcloud/Samfygros)
+  try {
+      if (url.includes('video_url=')) {
+          const urlObj = new URL(url);
+          const embedded = urlObj.searchParams.get('video_url');
+          if (embedded && embedded.startsWith('http')) {
+              url = embedded;
+              console.log(`[Proxy Bypass] Extracted embedded video_url: ${url}`);
+          }
+      }
+  } catch(e) {}
+
   // AUTOMATIC DRM BYPASS: Convert DASH (.mpd) to HLS (.m3u8)
   if (url.includes('.mpd')) {
       url = url.replace('.mpd', '.m3u8');
@@ -171,6 +183,18 @@ app.get('/api/parse', async (req, res) => {
 app.post('/api/download', async (req, res) => {
   let { url, title } = req.body;
   
+  // EXTRACT VIDEO_URL FROM PROXY LINKS (like Vidcloud/Samfygros)
+  try {
+      if (url && url.includes('video_url=')) {
+          const urlObj = new URL(url);
+          const embedded = urlObj.searchParams.get('video_url');
+          if (embedded && embedded.startsWith('http')) {
+              url = embedded;
+              console.log(`[Proxy Bypass] Extracted embedded video_url: ${url}`);
+          }
+      }
+  } catch(e) {}
+
   // AUTOMATIC DRM BYPASS: Convert DASH (.mpd) to HLS (.m3u8)
   if (url && url.includes('.mpd')) {
       url = url.replace('.mpd', '.m3u8');
