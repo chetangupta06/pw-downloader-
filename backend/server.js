@@ -466,16 +466,18 @@ async function processDownload(sessionId, m3u8Url) {
           keyUrl = resolveUrl(keyUrl, m3u8Url);
       }
       
-      // MAGIC BYPASS / FIX: The AES key is always hosted at the root /hls/enc.key on the CDN.
-      // Sometimes PW claims it's on api.penpencil.co (which requires an Auth token).
-      // Sometimes PW provides a relative path like /hls/720/enc.key (which returns 403 Forbidden).
-      // We ignore both and forcefully construct the true root CDN path!
+      // MAGIC BYPASS / FIX: For standard PW CDNs, the AES key is always hosted at the root /hls/enc.key.
+      // But for third-party proxies (like PW Thor / code.run), the key URI provided in the manifest is already correct!
       const m3u8UrlObj = new URL(m3u8Url);
-      const match = m3u8UrlObj.pathname.match(/^\/([^\/]+)\//);
-      if (match) {
-          const videoId = match[1]; 
-          keyUrl = `${m3u8UrlObj.origin}/${videoId}/hls/enc.key${m3u8UrlObj.search}`;
-          log(session, 'Forcefully remapped AES Key URL to root HLS directory on CDN.');
+      const isOfficialCDN = m3u8UrlObj.hostname.includes('cloudfront.net') || m3u8UrlObj.hostname.includes('penpencil.co') || m3u8UrlObj.hostname.includes('pw.live');
+      
+      if (isOfficialCDN) {
+          const match = m3u8UrlObj.pathname.match(/^\/([^\/]+)\//);
+          if (match) {
+              const videoId = match[1]; 
+              keyUrl = `${m3u8UrlObj.origin}/${videoId}/hls/enc.key${m3u8UrlObj.search}`;
+              log(session, 'Forcefully remapped AES Key URL to root HLS directory on CDN.');
+          }
       }
       
       try {
