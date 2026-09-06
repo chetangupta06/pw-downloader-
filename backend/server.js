@@ -213,6 +213,26 @@ app.get('/api/parse', async (req, res) => {
   }
 });
 
+app.get('/api/debug-key', async (req, res) => {
+  const { url } = req.query;
+  try {
+    const streamHeaders = getStreamHeaders(url);
+    const r = await axios.get(url, {
+      headers: streamHeaders,
+      responseType: 'arraybuffer'
+    });
+    res.json({ success: true, length: r.data.length, status: r.status });
+  } catch (e) {
+    res.status(500).json({
+      success: false,
+      status: e.response ? e.response.status : null,
+      message: e.message,
+      body: e.response && e.response.data ? Buffer.from(e.response.data).toString() : null,
+      headers: e.response ? e.response.headers : null
+    });
+  }
+});
+
 app.post('/api/download', async (req, res) => {
   let { url, title } = req.body;
   
