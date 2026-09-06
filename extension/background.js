@@ -11,6 +11,8 @@ const PW_URL_PATTERNS = [
   /cloudfront\.net\/.*master\.mpd/i,
   /testwave\.cc\/.*master\.m3u8/i,
   /testwave\.cc\/.*master\.mpd/i,
+  /(subodhpgcollege|code\.run|streamthorr|pwthor)/i,
+  /\/hls\/(\d+\/)?main\.m3u8/i,
   // Universal Match: Any master playlist with an AWS Policy/Signature (catches ALL new proxy domains)
   /master\.(m3u8|mpd).*(Policy=|Signature=)/i,
 ];
@@ -33,6 +35,9 @@ chrome.webRequest.onBeforeRequest.addListener(
       const isMasterUrl =
         url.includes('master.m3u8') ||
         url.includes('master.mpd') ||
+        url.includes('main.m3u8') ||
+        url.includes('subodhpgcollege') ||
+        url.includes('code.run') ||
         /\/hls\/\d+\/main\.m3u8/.test(url);
 
       if (!isMasterUrl) return;

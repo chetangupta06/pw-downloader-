@@ -1,19 +1,26 @@
 // PW Lecture Downloader - Injected Script
 // Defeats frontend obfuscation (like vidcloud.eu.org's crypto-js)
 
-const PW_PATTERNS = [
-  /sec-prod-mediacdn\.pw\.live\/[^?]+master\.m3u8/i,
-  /sec-prod-mediacdn\.pw\.live\/[^?]+master\.mpd/i,
-  /sec-prod-mediacdn\.pw\.live\/[^?]+\/hls\/\d+\/main\.m3u8/i,
-  /cdn\.penpencil\.co\/.*master\.m3u8/i,
-  /cdn\.penpencil\.co\/.*master\.mpd/i,
-  /cloudfront\.net\/.*master\.m3u8/i,
-  /cloudfront\.net\/.*master\.mpd/i,
-  /testwave\.cc\/.*master\.m3u8/i,
-  /testwave\.cc\/.*master\.mpd/i,
-  // Universal Match: Any master playlist with an AWS Policy/Signature
-  /master\.(m3u8|mpd).*(Policy=|Signature=)/i,
-];
+(function() {
+  if (window.__pwMainWorldInjected) return;
+  window.__pwMainWorldInjected = true;
+
+  const PW_PATTERNS = [
+    /sec-prod-mediacdn\.pw\.live\/[^?]+master\.m3u8/i,
+    /sec-prod-mediacdn\.pw\.live\/[^?]+master\.mpd/i,
+    /sec-prod-mediacdn\.pw\.live\/[^?]+\/hls\/\d+\/main\.m3u8/i,
+    /cdn\.penpencil\.co\/.*master\.m3u8/i,
+    /cdn\.penpencil\.co\/.*master\.mpd/i,
+    /cloudfront\.net\/.*master\.m3u8/i,
+    /cloudfront\.net\/.*master\.mpd/i,
+    /testwave\.cc\/.*master\.m3u8/i,
+    /testwave\.cc\/.*master\.mpd/i,
+    /(subodhpgcollege|code\.run|streamthorr|pwthor)/i,
+    /\/hls\/\d+\/main\.m3u8/i,
+    /\/hls\/main\.m3u8/i,
+    // Universal Match: Any master playlist with an AWS Policy/Signature
+    /master\.(m3u8|mpd).*(Policy=|Signature=)/i,
+  ];
 
 function checkAndReport(text) {
   if (!text || typeof text !== 'string') return;
@@ -100,3 +107,4 @@ setInterval(() => {
       if (el.value.includes('.m3u8') || el.value.includes('.mpd')) checkAndReport(el.value);
   });
 }, 2000);
+})();
