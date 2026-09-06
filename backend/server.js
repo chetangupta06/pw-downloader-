@@ -14,6 +14,39 @@ const axiosInstance = axios.create({
   httpsAgent: new https.Agent({ keepAlive: true, maxSockets: 300 }),
 });
 
+const getStreamHeaders = (targetUrl) => {
+  const headers = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+    'Accept': '*/*',
+    'Accept-Language': 'en-US,en;q=0.9',
+  };
+  if (!targetUrl) return headers;
+  const u = targetUrl.toLowerCase();
+  if (u.includes('subodhpgcollege') || u.includes('code.run') || u.includes('streamthorr') || u.includes('pwthor')) {
+    headers['Origin'] = 'https://pwthor.live';
+    headers['Referer'] = 'https://pwthor.live/';
+  } else if (u.includes('vidcloud')) {
+    headers['Origin'] = 'https://vidcloud.eu.org';
+    headers['Referer'] = 'https://vidcloud.eu.org/';
+  } else if (u.includes('samfygros')) {
+    headers['Origin'] = 'https://s3-cdn.samfygros.com';
+    headers['Referer'] = 'https://s3-cdn.samfygros.com/';
+  } else if (u.includes('rarestudy')) {
+    headers['Origin'] = 'https://rarestudy.in';
+    headers['Referer'] = 'https://rarestudy.in/';
+  } else {
+    headers['Origin'] = 'https://www.pw.live';
+    headers['Referer'] = 'https://www.pw.live/';
+  }
+  return headers;
+};
+
+axiosInstance.interceptors.request.use((config) => {
+  const streamHeaders = getStreamHeaders(config.url);
+  config.headers = { ...streamHeaders, ...config.headers };
+  return config;
+});
+
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -149,7 +182,7 @@ app.get('/api/parse', async (req, res) => {
       });
     }
 
-    const response = await axios.get(url);
+    const response = await axiosInstance.get(url);
     const parser = new m3u8Parser.Parser();
     parser.push(response.data);
     parser.end();
@@ -329,7 +362,7 @@ async function processDownload(sessionId, m3u8Url) {
      let maxSuccessfulIndex = startNum - 1;
      let hasHitEnd = false;
      let consecutiveNotFound = 0;
-     const CONCURRENCY = 150;
+     const CONCURRENCY = 25;
 
      const worker = async () => {
          while (!hasHitEnd && consecutiveNotFound < 10) {
@@ -433,7 +466,7 @@ async function processDownload(sessionId, m3u8Url) {
   }
 
   // Fallback to standard M3U8 process
-  let response = await axios.get(m3u8Url);
+  let response = await axiosInstance.get(m3u8Url);
   let parser = new m3u8Parser.Parser();
   parser.push(response.data);
   parser.end();
@@ -445,7 +478,7 @@ async function processDownload(sessionId, m3u8Url) {
       const bestQualityUrl = resolveUrl(manifest.playlists[0].uri, m3u8Url);
       
       log(session, `Fetching segments for best quality...`);
-      response = await axios.get(bestQualityUrl);
+      response = await axiosInstance.get(bestQualityUrl);
       parser = new m3u8Parser.Parser();
       parser.push(response.data);
       parser.end();
@@ -489,14 +522,23 @@ async function processDownload(sessionId, m3u8Url) {
           }
       }
       
-      try {
-          const keyRes = await axios.get(keyUrl, {
-              responseType: 'arraybuffer'
-          });
-          aesKeyBuffer = Buffer.from(keyRes.data);
-          log(session, 'Successfully fetched decryption key from CDN.');
-      } catch (e) {
-          throw new Error('Failed to fetch decryption key. ' + (e.response ? e.response.status : e.message));
+      let keyAttempts = 0;
+      while (!aesKeyBuffer && keyAttempts < 3) {
+          keyAttempts++;
+          try {
+              const keyRes = await axiosInstance.get(keyUrl, {
+                  responseType: 'arraybuffer',
+                  timeout: 15000
+              });
+              aesKeyBuffer = Buffer.from(keyRes.data);
+              log(session, 'Successfully fetched decryption key from CDN.');
+          } catch (e) {
+              if (keyAttempts >= 3) {
+                  throw new Error('Failed to fetch decryption key after 3 attempts. ' + (e.response ? e.response.status : e.message));
+              }
+              log(session, `Retrying AES key fetch (attempt ${keyAttempts + 1}/3)...`);
+              await new Promise(r => setTimeout(r, 1000 * keyAttempts));
+          }
       }
   }
 
@@ -509,7 +551,7 @@ async function processDownload(sessionId, m3u8Url) {
   let downloadedBytes = 0;
   
   let currentIndex = 0;
-  const CONCURRENCY_LIMIT = 150;
+  const CONCURRENCY_LIMIT = 25;
   let hasError = false;
 
   const worker = async () => {
@@ -526,54 +568,84 @@ async function processDownload(sessionId, m3u8Url) {
           const segmentUrl = resolveUrl(segment.uri, m3u8Url);
           const segmentPath = path.join(sessionDir, `seg_${i}.ts`);
           
-          try {
-              const segRes = await axiosInstance({
-                  url: segmentUrl,
-                  method: 'GET',
-                  responseType: 'stream',
-              });
+          let downloaded = false;
+          let attempts = 0;
 
-              const writer = fs.createWriteStream(segmentPath);
-              
-              if (aesKeyBuffer) {
-                  // HLS Spec: IV is either provided or is the segment sequence number
-                  let ivBuffer;
-                  if (segment.key && segment.key.iv) {
-                      ivBuffer = Buffer.alloc(16);
-                      for (let k = 0; k < 4; k++) {
-                          ivBuffer.writeUInt32BE(segment.key.iv[k] || 0, k * 4);
+          while (!downloaded && attempts < 3 && !hasError) {
+              attempts++;
+              try {
+                  const segRes = await axiosInstance({
+                      url: segmentUrl,
+                      method: 'GET',
+                      responseType: 'stream',
+                      timeout: 20000,
+                  });
+
+                  const writer = fs.createWriteStream(segmentPath);
+                  
+                  let decipher = null;
+                  if (aesKeyBuffer) {
+                      // HLS Spec: IV is either provided or is the segment sequence number
+                      let ivBuffer;
+                      if (segment.key && segment.key.iv) {
+                          ivBuffer = Buffer.alloc(16);
+                          for (let k = 0; k < 4; k++) {
+                              ivBuffer.writeUInt32BE(segment.key.iv[k] || 0, k * 4);
+                          }
+                      } else {
+                          const seqNum = manifest.mediaSequence + i;
+                          ivBuffer = Buffer.alloc(16);
+                          ivBuffer.writeUInt32BE(seqNum, 12);
                       }
-                  } else {
-                      const seqNum = manifest.mediaSequence + i;
-                      ivBuffer = Buffer.alloc(16);
-                      ivBuffer.writeUInt32BE(seqNum, 12);
+                      
+                      decipher = crypto.createDecipheriv('aes-128-cbc', aesKeyBuffer, ivBuffer);
                   }
                   
-                  const decipher = crypto.createDecipheriv('aes-128-cbc', aesKeyBuffer, ivBuffer);
-                  segRes.data.pipe(decipher).pipe(writer);
-              } else {
-                  segRes.data.pipe(writer);
-              }
-              
-              await new Promise((resolve, reject) => {
-                  writer.on('finish', resolve);
-                  writer.on('error', reject);
-              });
+                  await new Promise((resolve, reject) => {
+                      let done = false;
+                      const onError = (err) => {
+                          if (!done) {
+                              done = true;
+                              try { writer.destroy(); } catch (e) {}
+                              try { if (fs.existsSync(segmentPath)) fs.unlinkSync(segmentPath); } catch (e) {}
+                              reject(err);
+                          }
+                      };
+                      writer.on('finish', () => {
+                          if (!done) {
+                              done = true;
+                              resolve();
+                          }
+                      });
+                      writer.on('error', onError);
+                      segRes.data.on('error', onError);
+                      if (decipher) {
+                          decipher.on('error', onError);
+                          segRes.data.pipe(decipher).pipe(writer);
+                      } else {
+                          segRes.data.pipe(writer);
+                      }
+                  });
 
-              const stat = fs.statSync(segmentPath);
-              downloadedBytes += stat.size;
-              downloadedCount++;
-              
-              if (downloadedCount % 10 === 0 || downloadedCount === totalSegments) {
-                  log(session, `Downloaded ${downloadedCount}/${totalSegments} segments...`);
-                  const downloadedMB = (downloadedBytes / (1024 * 1024)).toFixed(2);
-                  const estMB = ((downloadedBytes / downloadedCount) * totalSegments / (1024 * 1024)).toFixed(2);
-                  sendEvent(session, 'progress', { downloadedCount, totalSegments, downloadedMB, estMB, isDirectMB: true });
+                  const stat = fs.statSync(segmentPath);
+                  downloadedBytes += stat.size;
+                  downloadedCount++;
+                  downloaded = true;
+                  
+                  if (downloadedCount % 10 === 0 || downloadedCount === totalSegments) {
+                      log(session, `Downloaded ${downloadedCount}/${totalSegments} segments...`);
+                      const downloadedMB = (downloadedBytes / (1024 * 1024)).toFixed(2);
+                      const estMB = ((downloadedBytes / downloadedCount) * totalSegments / (1024 * 1024)).toFixed(2);
+                      sendEvent(session, 'progress', { downloadedCount, totalSegments, downloadedMB, estMB, isDirectMB: true });
+                  }
+              } catch (err) {
+                  if (attempts >= 3) {
+                      log(session, `Error downloading segment ${i} after 3 attempts: ${err.message}`);
+                      hasError = true;
+                      throw err;
+                  }
+                  await new Promise(r => setTimeout(r, 1000 * attempts));
               }
-          } catch (err) {
-              log(session, `Error downloading segment ${i}: ${err.message}`);
-              hasError = true;
-              throw err;
           }
       }
   };
