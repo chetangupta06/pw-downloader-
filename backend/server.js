@@ -215,22 +215,48 @@ app.get('/api/parse', async (req, res) => {
 
 app.get('/api/debug-key', async (req, res) => {
   const { url } = req.query;
+  const results = {};
+  
+  // Test 1: Axios with streamHeaders
   try {
     const streamHeaders = getStreamHeaders(url);
-    const r = await axios.get(url, {
-      headers: streamHeaders,
-      responseType: 'arraybuffer'
-    });
-    res.json({ success: true, length: r.data.length, status: r.status });
+    const r = await axios.get(url, { headers: streamHeaders, responseType: 'arraybuffer', timeout: 8000 });
+    results.axios_basic = { success: true, status: r.status, len: r.data.length };
   } catch (e) {
-    res.status(500).json({
-      success: false,
-      status: e.response ? e.response.status : null,
-      message: e.message,
-      body: e.response && e.response.data ? Buffer.from(e.response.data).toString() : null,
-      headers: e.response ? e.response.headers : null
-    });
+    results.axios_basic = { success: false, status: e.response?.status, msg: e.message };
   }
+
+  // Test 2: Axios with full browser headers
+  try {
+    const fullHeaders = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+      'Accept': '*/*',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Origin': 'https://pwthor.live',
+      'Referer': 'https://pwthor.live/',
+      'sec-ch-ua': '"Chromium";v="128", "Not;A=Brand";v="24", "Google Chrome";v="128"',
+      'sec-ch-ua-mobile': '?0',
+      'sec-ch-ua-platform': '"Windows"',
+      'sec-fetch-dest': 'empty',
+      'sec-fetch-mode': 'cors',
+      'sec-fetch-site': 'cross-site'
+    };
+    const r2 = await axios.get(url, { headers: fullHeaders, responseType: 'arraybuffer', timeout: 8000 });
+    results.axios_full = { success: true, status: r2.status, len: r2.data.length };
+  } catch (e) {
+    results.axios_full = { success: false, status: e.response?.status, msg: e.message };
+  }
+
+  // Test 3: curl with full headers
+  try {
+    const { execSync } = require('child_process');
+    const stdout = execSync(`curl -s -o /dev/null -w "%{http_code}:%{size_download}" -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36" -H "Origin: https://pwthor.live" -H "Referer: https://pwthor.live/" "${url}"`, { timeout: 8000 });
+    results.curl = { output: stdout.toString().trim() };
+  } catch (e) {
+    results.curl = { error: e.message };
+  }
+
+  res.json(results);
 });
 
 app.post('/api/download', async (req, res) => {
