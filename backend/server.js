@@ -102,6 +102,13 @@ const resolveUrl = (relative, base) => {
 const bypassCloudflareProxy = (url) => {
     if (!url) return url;
     
+    // 0. Direct Northflank bypass for PW Thor:
+    // subodhpgcollege.site sits behind Cloudflare WAF which blocks datacenter/cloud IPs (403 Forbidden).
+    // Mapping directly to the origin cluster bypasses Cloudflare completely with 200 OK.
+    if (url.includes('subodhpgcollege.site')) {
+        url = url.replace(/https?:\/\/[^\/]*subodhpgcollege\.site/gi, 'https://p01--streamthorr--fttnk8y47n9c.code.run');
+    }
+    
     // 1. Legacy hardcoded bypass
     if (url.match(/^https?:\/\/[^\/]+\/play\/(d1d34p8vz63oiq\.cloudfront\.net.*)/i)) {
         url = url.replace(/^https?:\/\/[^\/]+\/play\/(d1d34p8vz63oiq\.cloudfront\.net.*)/i, 'https://$1');
@@ -211,52 +218,6 @@ app.get('/api/parse', async (req, res) => {
     console.error(error);
     res.status(500).json({ error: 'Failed to fetch or parse URL' });
   }
-});
-
-app.get('/api/debug-key', async (req, res) => {
-  const { url } = req.query;
-  const results = {};
-  
-  // Test 1: Axios with streamHeaders
-  try {
-    const streamHeaders = getStreamHeaders(url);
-    const r = await axios.get(url, { headers: streamHeaders, responseType: 'arraybuffer', timeout: 8000 });
-    results.axios_basic = { success: true, status: r.status, len: r.data.length };
-  } catch (e) {
-    results.axios_basic = { success: false, status: e.response?.status, msg: e.message };
-  }
-
-  // Test 2: Axios with full browser headers
-  try {
-    const fullHeaders = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
-      'Accept': '*/*',
-      'Accept-Language': 'en-US,en;q=0.9',
-      'Origin': 'https://pwthor.live',
-      'Referer': 'https://pwthor.live/',
-      'sec-ch-ua': '"Chromium";v="128", "Not;A=Brand";v="24", "Google Chrome";v="128"',
-      'sec-ch-ua-mobile': '?0',
-      'sec-ch-ua-platform': '"Windows"',
-      'sec-fetch-dest': 'empty',
-      'sec-fetch-mode': 'cors',
-      'sec-fetch-site': 'cross-site'
-    };
-    const r2 = await axios.get(url, { headers: fullHeaders, responseType: 'arraybuffer', timeout: 8000 });
-    results.axios_full = { success: true, status: r2.status, len: r2.data.length };
-  } catch (e) {
-    results.axios_full = { success: false, status: e.response?.status, msg: e.message };
-  }
-
-  // Test 3: curl with full headers
-  try {
-    const { execSync } = require('child_process');
-    const stdout = execSync(`curl -s -o /dev/null -w "%{http_code}:%{size_download}" -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36" -H "Origin: https://pwthor.live" -H "Referer: https://pwthor.live/" "${url}"`, { timeout: 8000 });
-    results.curl = { output: stdout.toString().trim() };
-  } catch (e) {
-    results.curl = { error: e.message };
-  }
-
-  res.json(results);
 });
 
 app.post('/api/download', async (req, res) => {
@@ -553,6 +514,7 @@ async function processDownload(sessionId, m3u8Url) {
       if (!keyUrl.startsWith('http')) {
           keyUrl = resolveUrl(keyUrl, m3u8Url);
       }
+      keyUrl = bypassCloudflareProxy(keyUrl);
       
       // MAGIC BYPASS / FIX: For standard PW CDNs, the AES key is always hosted at the root /hls/enc.key.
       // But for third-party proxies (like PW Thor / code.run), the key URI provided in the manifest is already correct!
@@ -611,7 +573,8 @@ async function processDownload(sessionId, m3u8Url) {
 
           const i = currentIndex++;
           const segment = manifest.segments[i];
-          const segmentUrl = resolveUrl(segment.uri, m3u8Url);
+          let segmentUrl = resolveUrl(segment.uri, m3u8Url);
+          segmentUrl = bypassCloudflareProxy(segmentUrl);
           const segmentPath = path.join(sessionDir, `seg_${i}.ts`);
           
           let downloaded = false;
