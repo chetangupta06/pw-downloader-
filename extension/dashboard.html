@@ -167,20 +167,43 @@
     .video-status.error { color: #f87171; }
     .video-status.active { color: #60a5fa; }
 
+    .dl-progress-wrap {
+      width: 100%;
+      margin-top: 8px;
+      display: none;
+    }
+    .dl-progress-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 11px;
+      margin-bottom: 4px;
+      line-height: 1.2;
+    }
+    .dl-progress-pct {
+      color: #38bdf8;
+      font-weight: 700;
+      font-size: 12px;
+    }
+    .dl-progress-detail {
+      color: #a78bfa;
+      font-size: 11px;
+      font-weight: 500;
+    }
     .dl-progress {
-      width: 150px;
-      height: 6px;
+      width: 100%;
+      height: 8px;
       background: #1e1b2e;
       border-radius: 99px;
       overflow: hidden;
-      margin-top: 8px;
-      display: none;
+      border: 1px solid rgba(255,255,255,0.08);
     }
     .dl-progress-bar {
       height: 100%;
       background: linear-gradient(90deg, #7c3aed, #3b82f6);
       width: 0%;
-      transition: width 0.3s;
+      transition: width 0.2s ease;
+      border-radius: 99px;
     }
 
     .terminal {
@@ -235,8 +258,18 @@
         </select>
       </div>
 
+      <div class="form-group" id="group-batch-select">
+        <label>Search & Select Batch by Name</label>
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <input type="text" id="batch-search-input" placeholder="🔍 Type to search batches (e.g. Lakshya, Arjuna, Prayas, Yakeen...)" />
+          <select id="select-batch">
+            <option value="">-- Choose from 700+ Available Batches --</option>
+          </select>
+        </div>
+      </div>
+
       <div class="form-group">
-        <label>Batch ID or Batch URL</label>
+        <label>Or Paste Batch ID / Slug / URL Directly</label>
         <div class="input-row">
           <input type="text" id="batch-id" placeholder="Batch ID, Slug, or URL (e.g. lakshya-jee-2027-181537)" value="678a0324dab28c8848cc026f" />
           <button class="btn btn-primary" id="btn-fetch-subjects">Fetch Subjects</button>

@@ -50,8 +50,113 @@ function logTerminal(msg, type = '') {
   term.scrollTop = term.scrollHeight;
 }
 
+// --- BATCH SELECTOR & SEARCH SYSTEM ---
+let allBatchesList = [];
+
+function renderBatchOptions(list) {
+  const sel = document.getElementById('select-batch');
+  if (!sel) return;
+  const currentVal = sel.value;
+  sel.innerHTML = `<option value="">-- Choose from ${list.length} Available Batches --</option>`;
+  
+  // Show up to 300 items at a time for fast DOM rendering
+  const displayList = list.slice(0, 300);
+  displayList.forEach(b => {
+    const opt = document.createElement('option');
+    opt.value = b.id;
+    opt.dataset.id = b.id;
+    opt.dataset.slug = b.slug || b.id;
+    opt.dataset.name = b.name;
+    const cat = b.category ? `[${b.category}] ` : '';
+    opt.textContent = `${cat}${b.name}`;
+    sel.appendChild(opt);
+  });
+
+  if (currentVal && list.some(b => b.id === currentVal)) {
+    sel.value = currentVal;
+  }
+}
+
+async function initBatchesDropdown() {
+  try {
+    const jsonUrl = chrome.runtime.getURL('batches.json');
+    const res = await fetch(jsonUrl);
+    if (res.ok) {
+      allBatchesList = await res.json();
+    }
+  } catch(e) {
+    console.warn('Failed to load local batches.json, using defaults:', e);
+  }
+
+  // Ensure default popular batches exist if json didn't load
+  if (!allBatchesList || allBatchesList.length === 0) {
+    allBatchesList = [
+      { name: 'Lakshya JEE 2027', id: '6779345c20fa0756e4a7fd08', slug: 'lakshya-jee-2027-181537', category: 'IIT-JEE' },
+      { name: 'Lakshya NEET 2027', id: '6779346f920e596fe7f0e247', slug: 'lakshya-neet-2027-466847', category: 'NEET' },
+      { name: 'Arjuna JEE 2.0 2026', id: '678a0324dab28c8848cc026f', slug: 'arjuna-jee-2-0-2026-641973', category: 'IIT-JEE' },
+      { name: 'Arjuna JEE 2026', id: '660e5dbb03cfd80018f6f50b', slug: 'arjuna-jee-2026-448201', category: 'IIT-JEE' },
+      { name: 'Arjuna NEET 2026', id: '660e5e044ffcb90018dc3b9b', slug: 'arjuna-neet-2026-883921', category: 'NEET' },
+      { name: 'Prayas JEE 2026', id: '661fb5ec3fa3a9001844b2fc', slug: 'prayas-jee-2026-382910', category: 'IIT-JEE' },
+      { name: 'Yakeen NEET 2026', id: '661fb55f269a8b00188981f3', slug: 'yakeen-neet-2026-192847', category: 'NEET' }
+    ];
+  }
+
+  renderBatchOptions(allBatchesList);
+
+  const searchInput = document.getElementById('batch-search-input');
+  const selectBatch = document.getElementById('select-batch');
+
+  if (searchInput) {
+    searchInput.addEventListener('input', (e) => {
+      const q = e.target.value.toLowerCase().trim();
+      
+      // If user pasted a URL or 24-hex Mongo ID directly into search bar
+      const urlMatch = q.match(/(?:batches|batch|details\/|details\?id=)\/?([a-zA-Z0-9_-]+)/);
+      if (urlMatch || /^[a-f0-9]{24}$/i.test(q)) {
+        const detected = urlMatch ? urlMatch[1] : q;
+        document.getElementById('batch-id').value = detected;
+        logTerminal(`Detected ID/URL in search bar: ${detected}`, 'ok');
+        document.getElementById('btn-fetch-subjects').click();
+        return;
+      }
+
+      if (!q) {
+        renderBatchOptions(allBatchesList);
+        return;
+      }
+
+      const filtered = allBatchesList.filter(b => 
+        (b.name && b.name.toLowerCase().includes(q)) || 
+        (b.category && b.category.toLowerCase().includes(q)) ||
+        (b.slug && b.slug.toLowerCase().includes(q)) ||
+        (b.id && b.id.toLowerCase().includes(q))
+      );
+      renderBatchOptions(filtered);
+    });
+  }
+
+  if (selectBatch) {
+    selectBatch.addEventListener('change', () => {
+      const selOpt = selectBatch.options[selectBatch.selectedIndex];
+      if (!selOpt || !selOpt.value) return;
+
+      const serverType = document.getElementById('api-server').value;
+      const batchVal = (serverType === 'pwjarvis' && selOpt.dataset.slug) ? selOpt.dataset.slug : selOpt.dataset.id;
+      
+      document.getElementById('batch-id').value = batchVal;
+      window.currentBatchId = selOpt.dataset.id;
+      window.currentBatchSlug = selOpt.dataset.slug || batchVal;
+      
+      logTerminal(`Selected Batch: ${selOpt.dataset.name || selOpt.text}`, 'ok');
+      document.getElementById('btn-fetch-subjects').click();
+    });
+  }
+}
+
 // Auto-detect Batch ID from open PW tabs
 document.addEventListener('DOMContentLoaded', async () => {
+  initBatchesDropdown();
+
   try {
     const tabs = await chrome.tabs.query({});
     // Prioritize active tabs
@@ -357,11 +462,17 @@ document.getElementById('btn-fetch-videos').addEventListener('click', async () =
       <div class="video-item" id="vid-${i}">
         <label style="display: flex; align-items: center; gap: 12px; cursor: pointer; width: 100%;">
           <input type="checkbox" class="video-checkbox" data-index="${i}" checked style="width: 18px; height: 18px; accent-color: #7c3aed; cursor: pointer; flex-shrink: 0;" />
-          <div class="video-info" style="flex: 1;">
+          <div class="video-info" style="flex: 1; min-width: 0;">
             <div class="video-title">${i+1}. ${title}</div>
             <div class="video-status" id="status-${i}">Waiting...</div>
-            <div class="dl-progress" id="prog-wrap-${i}">
-              <div class="dl-progress-bar" id="prog-bar-${i}"></div>
+            <div class="dl-progress-wrap" id="prog-wrap-${i}">
+              <div class="dl-progress-meta">
+                <span class="dl-progress-pct" id="prog-pct-${i}">0%</span>
+                <span class="dl-progress-detail" id="prog-detail-${i}">0.0 MB @ 0.0 MB/s</span>
+              </div>
+              <div class="dl-progress">
+                <div class="dl-progress-bar" id="prog-bar-${i}"></div>
+              </div>
             </div>
           </div>
         </label>
@@ -442,6 +553,14 @@ async function downloadVideo(vid, index) {
     statusEl.textContent = msg;
     statusEl.className = 'video-status ' + type;
     logTerminal(`[${title}] ${msg}`, type);
+  };
+
+  const updateProgress = (pct, detailText) => {
+    if (progBar) progBar.style.width = `${pct}%`;
+    const pctEl = document.getElementById(`prog-pct-${index}`);
+    const detailEl = document.getElementById(`prog-detail-${index}`);
+    if (pctEl) pctEl.textContent = `${pct}%`;
+    if (detailEl && detailText) detailEl.textContent = detailText;
   };
   
   document.getElementById(`vid-${index}`).scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -637,8 +756,7 @@ async function downloadVideo(vid, index) {
     if (isDirectMp4) {
         setStatus('Streaming direct MP4...', 'active');
         progWrap.style.display = 'block';
-        progBar.style.width = '0%';
-        progBar.textContent = '0%';
+        updateProgress(0, 'Connecting...');
 
         const videoRes = await fetch(signedUrl);
         if (!videoRes.ok) throw new Error(`Video fetch HTTP ${videoRes.status}: ${videoRes.statusText}`);
@@ -675,18 +793,15 @@ async function downloadVideo(vid, index) {
             if (totalBytes > 0) {
                 const pct = Math.min(100, Math.floor((downloadedBytes / totalBytes) * 100));
                 const dlMb = (downloadedBytes / (1024 * 1024)).toFixed(1);
-                progBar.style.width = `${pct}%`;
-                progBar.textContent = `${pct}% (${dlMb}${totalMbStr} @ ${currentSpeed} MB/s)`;
+                updateProgress(pct, `${dlMb}${totalMbStr} @ ${currentSpeed} MB/s`);
             } else {
                 const dlMb = (downloadedBytes / (1024 * 1024)).toFixed(1);
-                progBar.style.width = '100%';
-                progBar.textContent = `${dlMb} MB @ ${currentSpeed} MB/s`;
+                updateProgress(100, `${dlMb} MB @ ${currentSpeed} MB/s`);
             }
         }
 
         await writable.close();
-        progBar.style.width = '100%';
-        progBar.textContent = '100% (Complete)';
+        updateProgress(100, `Done (${(downloadedBytes / (1024 * 1024)).toFixed(1)} MB)`);
         setStatus('Saved Successfully!', 'success');
         return;
     }
@@ -985,9 +1100,9 @@ async function downloadVideo(vid, index) {
 
             if (completedCount % 5 === 0 || completedCount === segments.length) {
                 const pct = Math.round((completedCount / segments.length) * 100);
-                progBar.style.width = `${pct}%`;
                 const mbDownloaded = (totalBytesDownloaded / (1024 * 1024)).toFixed(1);
-                statusEl.textContent = `Downloading... ${pct}% (${completedCount}/${segments.length}) • ${mbDownloaded} MB (${currentSpeedMBs} MB/s)`;
+                updateProgress(pct, `${completedCount}/${segments.length} segs • ${mbDownloaded} MB @ ${currentSpeedMBs} MB/s`);
+                statusEl.textContent = `Downloading... ${pct}% (${completedCount}/${segments.length})`;
             }
         }
     };
@@ -998,6 +1113,8 @@ async function downloadVideo(vid, index) {
     await Promise.all(workers);
     await writerPromise;
     await writable.close();
+    
+    updateProgress(100, `Done (${(totalBytesDownloaded / (1024 * 1024)).toFixed(1)} MB)`);
     
     if (window.isMobileFallback) {
         setStatus('Transferring to Downloads folder...', 'active');
