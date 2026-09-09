@@ -256,4 +256,25 @@ document.getElementById('btn-copy-url').addEventListener('click', () => {
 });
 
 // --- Boot ---
+if (document.getElementById('btn-open-dashboard')) {
+  document.getElementById('btn-open-dashboard').addEventListener('click', () => {
+    chrome.tabs.create({ url: 'dashboard.html' });
+    window.close();
+  });
+}
+
+if (document.getElementById('btn-manual-fetch')) {
+  document.getElementById('btn-manual-fetch').addEventListener('click', () => {
+    const manualUrl = document.getElementById('manual-url-input').value.trim();
+    if (manualUrl) {
+      detectedUrl = manualUrl;
+      detectedTitle = 'Manual_Download';
+      document.getElementById('url-display').textContent = manualUrl;
+      document.getElementById('lecture-title-input').value = detectedTitle;
+      showState('state-detected');
+      fetchQualities(); // Automatically fetch qualities to save a click
+    }
+  });
+}
+
 init();

@@ -9,13 +9,27 @@
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-    body {
+    html, body {
       width: 420px;
       min-height: 300px;
       background: #0d0b14;
       color: #f3f4f6;
       font-family: 'Inter', sans-serif;
-      overflow: hidden;
+    }
+    body {
+      overflow-x: hidden;
+      overflow-y: auto;
+    }
+    
+    @media (pointer: coarse) {
+      html, body {
+        width: 100%;
+        min-width: 100vw;
+        height: 100%;
+        min-height: 100vh;
+      }
+      .content { padding: 12px; }
+      .btn { padding: 14px 14px; font-size: 14px; }
     }
 
     .header {
@@ -228,9 +242,22 @@
         <strong>Open a PW lecture</strong> on any platform and play it.<br/>
         The extension will automatically detect the stream!
       </p>
+      
+      <button class="btn btn-save" id="btn-open-dashboard" style="margin-top: 10px; width: 100%;">
+        📚 Open Bulk Chapter Downloader
+      </button>
+
       <div class="tip-box">
         <span class="tip-title">💡 Supported Platforms</span>
         PW App · PW Website · Any website streaming from pw.live or penpencil.co
+      </div>
+
+      <div style="margin-top: 14px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,.05);">
+        <label style="font-size:11px; font-weight:600; color:#9ca3af; text-transform:uppercase; letter-spacing:0.8px;">Manual Downloader</label>
+        <div style="display:flex; gap:6px; margin-top:6px;">
+          <input type="text" id="manual-url-input" style="flex:1; background:#1a1625; border:1px solid rgba(255,255,255,.07); border-radius:8px; padding:9px 11px; font-size:11px; color:#f3f4f6; font-family:'Inter',sans-serif; outline:none;" placeholder="Paste .m3u8 or .mpd link..." />
+          <button id="btn-manual-fetch" class="btn btn-primary" style="padding:9px 12px; flex-shrink:0;">Fetch</button>
+        </div>
       </div>
     </div>
 

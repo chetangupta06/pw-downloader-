@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "description": "Automatically detect PW lecture videos on any platform and download them in your desired quality.",
   "permissions": [
+    "declarativeNetRequest",
     "webRequest",
     "storage",
     "tabs",
@@ -32,21 +33,18 @@
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
+      "matches": [
+        "*://*.pw.live/*",
+        "*://*.penpencil.co/*",
+        "*://*.classplusapp.com/*",
+        "*://*.vidcloud.eu.org/*",
+        "*://*.rarestudy.in/*",
+        "*://*.samfygros.com/*",
+        "*://*.pwthor.live/*",
+        "*://*.pwjarvis.com/*"
+      ],
       "js": ["content.js"],
       "run_at": "document_start"
-    },
-    {
-      "matches": ["<all_urls>"],
-      "js": ["inject.js"],
-      "world": "MAIN",
-      "run_at": "document_start"
-    }
-  ],
-  "web_accessible_resources": [
-    {
-      "resources": ["inject.js"],
-      "matches": ["<all_urls>"]
     }
   ],
   "icons": {

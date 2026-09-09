@@ -1,55 +1,138 @@
 // PW Lecture Downloader - Content Script
-// Runs in ISOLATED world, injects inject.js into MAIN world safely without CSP violation.
+// Runs on every page as a secondary interception layer.
+// Patches XMLHttpRequest and fetch to catch video URLs that
+// the webRequest API might miss (e.g., requests inside iframes).
 
-// 1. Safe, CSP-compliant injection of inject.js using extension URL
-try {
-  const script = document.createElement('script');
-  script.src = chrome.runtime.getURL('inject.js');
-  script.onload = function () {
-    this.remove();
+(function () {
+  const PW_PATTERNS = [
+    /master\.m3u8(\?|$)/i,
+    /master\.mpd(\?|$)/i,
+    /\/hls\/\d+\/main\.m3u8/i,
+    /\/dash\//i,
+    /(subodhpgcollege|code\.run|streamthorr)/i,
+    /cors\.pwjarvis\.com/i,
+    /\/video\/[a-f0-9]+\/\d+p\/video\.mp4/i,
+  ];
+
+  function checkAndReport(url) {
+    if (!url || typeof url !== 'string') return;
+    if (PW_PATTERNS.some((p) => p.test(url))) {
+      chrome.runtime.sendMessage({ type: 'SET_URL', url }, () => {
+        // Ignore errors (e.g., background not ready)
+        if (chrome.runtime.lastError) {}
+      });
+    }
+  }
+
+  // --- Patch fetch ---
+  const originalFetch = window.fetch;
+  window.fetch = async function (...args) {
+    const url = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url ? args[0].url : '');
+    checkAndReport(url);
+    
+    try {
+        const response = await originalFetch.apply(this, args);
+        const clonedResponse = response.clone();
+        
+        clonedResponse.text().then(text => {
+            if (typeof text === 'string' && text.startsWith('#EXTM3U')) {
+                if (!url.includes('enc.key') && (text.includes('#EXT-X-STREAM-INF') || text.includes('#EXTINF:'))) {
+                    chrome.runtime.sendMessage({ type: 'SET_URL', url: response.url || url }, () => {
+                        if (chrome.runtime.lastError) {}
+                    });
+                }
+            }
+        }).catch(() => {});
+        
+        return response;
+    } catch (e) {
+        return Promise.reject(e);
+    }
   };
-  (document.head || document.documentElement).appendChild(script);
-} catch (e) {
-  // Ignored
-}
 
-// 2. Isolated world message listener (receives detected video URLs from inject.js in MAIN world)
-window.addEventListener('message', function (event) {
-  if (event.source !== window || !event.data || event.data.type !== 'PW_URL_DETECTED') return;
+  // --- Patch XMLHttpRequest ---
+  const originalXhrOpen = XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open = function (method, url, ...rest) {
+    checkAndReport(url);
+    
+    // Attach event listener to check the response content for obfuscated M3U8 playlists
+    this.addEventListener('load', function() {
+        try {
+            const responseText = this.responseText;
+            // If the response is an HLS playlist (even if the URL is completely obfuscated)
+            if (typeof responseText === 'string' && responseText.startsWith('#EXTM3U')) {
+                // Ensure we don't accidentally intercept small media playlists if we already got a master
+                if (!url.includes('enc.key') && responseText.includes('#EXT-X-STREAM-INF')) {
+                    chrome.runtime.sendMessage({ type: 'SET_URL', url: this.responseURL || url }, () => {
+                        if (chrome.runtime.lastError) {}
+                    });
+                } else if (!url.includes('enc.key') && responseText.includes('#EXTINF:')) {
+                    // Fallback for direct media playlists without a master
+                    chrome.runtime.sendMessage({ type: 'SET_URL', url: this.responseURL || url }, () => {
+                        if (chrome.runtime.lastError) {}
+                    });
+                }
+            }
+        } catch(e) {
+            // Ignore response reading errors (e.g., binary data or CORS)
+        }
+    });
 
-  chrome.runtime.sendMessage({ type: 'SET_URL', url: event.data.url, title: event.data.title }, () => {
-    if (chrome.runtime.lastError) {}
-  });
-});
+    return originalXhrOpen.call(this, method, url, ...rest);
+  };
 
-// 3. Fallback DOM Scanner for standard HTML5 video elements
-const PW_FALLBACK_PATTERNS = [
-  /master\.(m3u8|mpd)/i,
-  /\/hls\/(\d+\/)?main\.m3u8/i,
-  /(subodhpgcollege|code\.run|streamthorr|pwthor)/i,
-  /sec-prod-mediacdn\.pw\.live/i,
-  /cloudfront\.net/i,
-  /testwave\.cc/i,
-];
-
-function checkFallback(url) {
-  if (!url || typeof url !== 'string' || url.startsWith('blob:')) return;
-  if (PW_FALLBACK_PATTERNS.some((p) => p.test(url))) {
-    chrome.runtime.sendMessage({ type: 'SET_URL', url, title: document.title }, () => {
-      if (chrome.runtime.lastError) {}
+  // --- Scan DOM for <video> and <source> tags ---
+  function scanDOM() {
+    document.querySelectorAll('video[src], source[src]').forEach((el) => {
+      checkAndReport(el.src);
     });
   }
-}
 
-function scanDOM() {
-  document.querySelectorAll('video[src], source[src]').forEach((el) => checkFallback(el.src));
-  document.querySelectorAll('input[type="hidden"]').forEach((el) => {
-    if (el.value && (el.value.includes('.m3u8') || el.value.includes('.mpd'))) {
-      checkFallback(el.value);
-    }
-  });
-}
+  // Scan on load and on DOM mutations
+  document.addEventListener('DOMContentLoaded', scanDOM);
+  const observer = new MutationObserver(scanDOM);
+  observer.observe(document.documentElement, { childList: true, subtree: true });
 
-document.addEventListener('DOMContentLoaded', scanDOM);
-const observer = new MutationObserver(scanDOM);
-observer.observe(document.documentElement, { childList: true, subtree: true });
+  // --- Auto clicker for Android/Windows popup and video autoplay ---
+  function initAutoClicker() {
+    const allowedDomains = ['vidcloud.eu.org', 'rarestudy.in', 'samfygros.com', 'pwthor.live', 'pwjarvis.com'];
+    if (!allowedDomains.some(d => window.location.hostname.includes(d))) return;
+    
+    const clickerInterval = setInterval(() => {
+      // 1. Click Android / Windows button
+      const elements = document.querySelectorAll('span, div, button, p, h1, h2, h3, h4');
+      for (let el of elements) {
+        if (el.textContent && el.textContent.includes('Android / Windows') && el.children.length === 0) {
+          el.click();
+          if (el.parentElement) el.parentElement.click();
+          if (el.parentElement?.parentElement) el.parentElement.parentElement.click();
+        }
+      }
+
+      // 2. Mute and play video elements
+      document.querySelectorAll('video').forEach((v) => {
+        if (v.src) checkAndReport(v.src);
+        v.querySelectorAll('source').forEach(s => { if (s.src) checkAndReport(s.src); });
+        try {
+          v.muted = true;
+          v.play();
+        } catch (e) {}
+      });
+
+      // 3. Click play buttons
+      document.querySelectorAll('.shaka-play-button, .vjs-big-play-button, button[aria-label="Play"]').forEach((btn) => {
+        try {
+          btn.click();
+        } catch (e) {}
+      });
+    }, 200);
+
+    setTimeout(() => clearInterval(clickerInterval), 25000);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initAutoClicker);
+  } else {
+    initAutoClicker();
+  }
+})();

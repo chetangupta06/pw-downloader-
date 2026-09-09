@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>PW Bulk Chapter Downloader</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    
+    body {
+      background: #0d0b14;
+      color: #f3f4f6;
+      font-family: 'Inter', sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .header {
+      background: linear-gradient(135deg, #1e1b2e 0%, #0d0b14 100%);
+      border-bottom: 1px solid rgba(139, 92, 246, 0.2);
+      padding: 16px 32px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .logo {
+      width: 42px; height: 42px;
+      background: linear-gradient(135deg, #7c3aed, #3b82f6);
+      border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 20px;
+      box-shadow: 0 0 20px rgba(124,58,237,0.4);
+    }
+    .header-text h1 { font-size: 18px; font-weight: 800; color: #fff; }
+    .header-text p  { font-size: 12px; color: #9ca3af; margin-top: 2px; }
+
+    .container {
+      max-width: 900px;
+      margin: 30px auto;
+      width: 100%;
+      padding: 0 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .panel {
+      background: #1a1625;
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 16px;
+      padding: 24px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+    }
+
+    .panel-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: #a78bfa;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .form-group label {
+      font-size: 12px;
+      font-weight: 600;
+      color: #d1d5db;
+    }
+    .input-row {
+      display: flex;
+      gap: 12px;
+    }
+    input:not([type="checkbox"]), select {
+      flex: 1;
+      width: 100%;
+      background: #0f0f13;
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 10px;
+      padding: 12px 16px;
+      font-size: 14px;
+      color: #fff;
+      font-family: 'Inter', sans-serif;
+      outline: none;
+      transition: all 0.2s;
+    }
+    input:not([type="checkbox"]):focus, select:focus {
+      border-color: #7c3aed;
+      box-shadow: 0 0 0 2px rgba(124,58,237,0.2);
+    }
+
+    .btn {
+      border: none; border-radius: 10px; padding: 12px 24px;
+      font-size: 14px; font-weight: 600; cursor: pointer;
+      transition: all 0.2s; font-family: 'Inter', sans-serif;
+      width: 100%;
+    }
+    @media (min-width: 600px) {
+      .btn { width: auto; }
+    }
+    .btn:active { transform: scale(0.97); }
+    .btn-primary {
+      background: linear-gradient(135deg, #7c3aed, #5b21b6); color: #fff;
+      box-shadow: 0 4px 14px rgba(124,58,237,0.35);
+    }
+    .btn-primary:hover { background: linear-gradient(135deg, #6d28d9, #4c1d95); }
+    .btn-primary:disabled { background: #374151; color: #6b7280; cursor: not-allowed; box-shadow: none; }
+    
+    .btn-success {
+      background: linear-gradient(135deg, #059669, #047857); color: #fff;
+      box-shadow: 0 4px 14px rgba(5,150,105,0.35);
+    }
+    .btn-success:hover { background: linear-gradient(135deg, #047857, #065f46); }
+    .btn-success:disabled { background: #374151; color: #6b7280; cursor: not-allowed; box-shadow: none; }
+
+    /* Video List */
+    .video-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      max-height: 400px;
+      overflow-y: auto;
+      padding-right: 8px;
+    }
+    .video-list::-webkit-scrollbar { width: 6px; }
+    .video-list::-webkit-scrollbar-thumb { background: #374151; border-radius: 6px; }
+
+    .video-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #0f0f13;
+      border: 1px solid rgba(255,255,255,0.05);
+      border-radius: 10px;
+      padding: 12px 16px;
+      transition: all 0.2s;
+    }
+    .video-item:hover {
+      border-color: rgba(124,58,237,0.3);
+      background: rgba(124,58,237,0.05);
+    }
+    .video-info { display: flex; flex-direction: column; gap: 4px; overflow: hidden; }
+    .video-title { font-size: 14px; font-weight: 600; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .video-status { font-size: 11px; color: #9ca3af; }
+    
+    /* Responsive Queries */
+    @media (max-width: 600px) {
+      .container { margin: 15px auto; padding: 0 12px; }
+      .panel { padding: 16px; }
+      .header { padding: 16px; }
+      .input-row { flex-direction: column; gap: 12px; }
+      input:not([type="checkbox"]), select { flex: 1 1 100%; }
+      .video-item { padding: 10px 12px; }
+    }
+    .video-status.success { color: #34d399; }
+    .video-status.error { color: #f87171; }
+    .video-status.active { color: #60a5fa; }
+
+    .dl-progress {
+      width: 150px;
+      height: 6px;
+      background: #1e1b2e;
+      border-radius: 99px;
+      overflow: hidden;
+      margin-top: 8px;
+      display: none;
+    }
+    .dl-progress-bar {
+      height: 100%;
+      background: linear-gradient(90deg, #7c3aed, #3b82f6);
+      width: 0%;
+      transition: width 0.3s;
+    }
+
+    .terminal {
+      background: #000;
+      border: 1px solid rgba(255,255,255,0.1);
+      border-top: 3px solid #7c3aed;
+      border-radius: 12px;
+      padding: 16px;
+      height: 200px;
+      overflow-y: auto;
+      font-family: 'Consolas', monospace;
+      font-size: 12px;
+      color: #d1d5db;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .terminal::-webkit-scrollbar { width: 6px; }
+    .terminal::-webkit-scrollbar-thumb { background: #374151; border-radius: 6px; }
+    .log-time { color: #4b5563; margin-right: 8px; }
+    .log-ok { color: #34d399; }
+    .log-err { color: #f87171; }
+    .log-warn { color: #fbbf24; }
+
+    #step-2 { display: none; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="logo">📚</div>
+    <div class="header-text">
+      <h1>PW Bulk Chapter Downloader</h1>
+      <p>Seamless Native Extension Downloader (100% Quality)</p>
+    </div>
+  </div>
+
+  <div class="container">
+    
+    <!-- Step 1: Batch & Subject -->
+    <div class="panel" id="step-1">
+      <div class="panel-title">1. Select Content</div>
+      
+      <div class="form-group">
+        <label>API Server</label>
+        <select id="api-server">
+          <option value="vidcloud">Server 1: Vidcloud (Fastest, No Key)</option>
+          <option value="rarestudy">Server 2: RareStudy (Native, Key Required)</option>
+          <option value="samfygros">Server 3: Samfygros (Native, Key Required)</option>
+          <option value="pwthor">Server 4: PW Thor (Slower, No Key)</option>
+          <option value="pwjarvis">Server 5: PW Jarvis (Direct MP4, High Speed)</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>Batch ID or Batch URL</label>
+        <div class="input-row">
+          <input type="text" id="batch-id" placeholder="Batch ID, Slug, or URL (e.g. lakshya-jee-2027-181537)" value="678a0324dab28c8848cc026f" />
+          <button class="btn btn-primary" id="btn-fetch-subjects">Fetch Subjects</button>
+        </div>
+      </div>
+
+      <div class="form-group" style="display:none;" id="group-subject">
+        <label>Subject</label>
+        <select id="select-subject"></select>
+      </div>
+      
+      <div class="form-group" style="display:none;" id="group-chapter">
+        <label>Chapter & Content Type</label>
+        <div class="input-row">
+          <select id="select-chapter" style="flex: 2;"></select>
+          <select id="select-type" style="flex: 1;">
+            <option value="videos">Lectures</option>
+            <option value="notes">Class Notes (PDF)</option>
+            <option value="DppNotes">DPPs (PDF)</option>
+            <option value="DppVideos">DPP Videos</option>
+          </select>
+          <button class="btn btn-primary" id="btn-fetch-videos">Load</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 2: Videos -->
+    <div class="panel" id="step-2">
+      <div class="panel-title">2. Content to Download</div>
+      <div class="video-list" id="video-list">
+        <!-- Videos will be injected here -->
+      </div>
+      <div style="margin-top: 20px; display: flex; justify-content: space-between; align-items: center;">
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <div style="font-size: 13px; color: #9ca3af;"><strong id="video-count">0</strong> videos found in this chapter.</div>
+          <label style="display: flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer; color: #d1d5db; user-select: none;">
+            <input type="checkbox" id="check-all" checked style="width: 18px; height: 18px; accent-color: #7c3aed; cursor: pointer;" />
+            <strong>Select All</strong>
+          </label>
+        </div>
+        <button class="btn btn-success" id="btn-start-bulk" style="font-size: 16px; padding: 14px 32px;">
+          ⬇️ Start Bulk Download
+        </button>
+      </div>
+    </div>
+
+    <!-- Step 3: Progress -->
+    <div class="panel" id="step-3">
+      <div class="panel-title">3. Extraction & Download Progress</div>
+      <div class="terminal" id="terminal">
+        <div><span class="log-time">System</span> Ready. Waiting to start...</div>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="dashboard.js"></script>
+</body>
+</html>
