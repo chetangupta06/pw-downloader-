@@ -105,12 +105,8 @@ const bypassCloudflareProxy = (url) => {
     // Intelligently convert direct DASH links back into the Master Playlist
     url = url.replace(/\/dash\/.*$/i, '/master.m3u8');
 
-    // 0. Direct Northflank bypass for PW Thor:
-    // subodhpgcollege.site sits behind Cloudflare WAF which blocks datacenter/cloud IPs (403 Forbidden).
-    // Mapping directly to the origin cluster bypasses Cloudflare completely with 200 OK.
-    if (url.includes('subodhpgcollege.site')) {
-        url = url.replace(/https?:\/\/[^\/]*subodhpgcollege\.site/gi, 'https://p01--streamthorr--fttnk8y47n9c.code.run');
-    }
+    // Revive dead code.run domains to live Thor streaming server
+    url = url.replace(/https?:\/\/[^\/]*code\.run/gi, 'https://stream.subodhpgcollege.site');
     
     // 1. Legacy hardcoded bypass
     if (url.match(/^https?:\/\/[^\/]+\/play\/(d1d34p8vz63oiq\.cloudfront\.net.*)/i)) {
