@@ -206,6 +206,111 @@
       border-radius: 99px;
     }
 
+    /* Smart Batch Filter Pills */
+    .batch-filter-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 6px;
+      margin-bottom: 8px;
+    }
+    .pill {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: #9ca3af;
+      padding: 4px 10px;
+      border-radius: 99px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      user-select: none;
+    }
+    .pill:hover {
+      background: rgba(124, 58, 237, 0.2);
+      color: #fff;
+      border-color: rgba(124, 58, 237, 0.4);
+    }
+    .pill.active {
+      background: linear-gradient(135deg, #7c3aed, #3b82f6);
+      color: #fff;
+      border-color: transparent;
+      box-shadow: 0 0 10px rgba(124, 58, 237, 0.4);
+    }
+
+    /* Floating Autocomplete Dropdown */
+    .batch-autocomplete-dropdown {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      max-height: 280px;
+      overflow-y: auto;
+      background: #151221;
+      border: 1px solid rgba(139, 92, 246, 0.35);
+      border-radius: 12px;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.7);
+      z-index: 100;
+      margin-top: 6px;
+    }
+    .batch-autocomplete-dropdown::-webkit-scrollbar {
+      width: 6px;
+    }
+    .batch-autocomplete-dropdown::-webkit-scrollbar-thumb {
+      background: #374151;
+      border-radius: 6px;
+    }
+    .batch-card {
+      padding: 10px 14px;
+      cursor: pointer;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      transition: all 0.15s ease;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+    }
+    .batch-card:last-child {
+      border-bottom: none;
+    }
+    .batch-card:hover, .batch-card.active-item {
+      background: rgba(124, 58, 237, 0.22);
+    }
+    .batch-card-main {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
+      flex: 1;
+    }
+    .batch-card-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #f3f4f6;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .batch-card-sub {
+      font-size: 10px;
+      color: #9ca3af;
+      font-family: monospace;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .batch-card-tag {
+      font-size: 10px;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 6px;
+      background: rgba(124, 58, 237, 0.25);
+      color: #c4b5fd;
+      border: 1px solid rgba(124, 58, 237, 0.35);
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
     .terminal {
       background: #000;
       border: 1px solid rgba(255,255,255,0.1);
@@ -258,22 +363,41 @@
         </select>
       </div>
 
-      <div class="form-group" id="group-batch-select">
-        <label>Search & Select Batch by Name</label>
-        <div style="display: flex; flex-direction: column; gap: 8px;">
-          <input type="text" id="batch-search-input" placeholder="🔍 Type to search batches (e.g. Lakshya, Arjuna, Prayas, Yakeen...)" />
-          <select id="select-batch">
-            <option value="">-- Choose from 700+ Available Batches --</option>
-          </select>
+      <!-- Unified Smart Batch Selector -->
+      <div class="form-group" style="position: relative;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <label style="margin-bottom: 0;">Batch Selection & Search</label>
+          <span id="batch-count-badge" style="font-size: 11px; color: #a78bfa; background: rgba(124,58,237,0.15); padding: 2px 8px; border-radius: 99px; border: 1px solid rgba(124,58,237,0.3);">707 Batches</span>
         </div>
-      </div>
 
-      <div class="form-group">
-        <label>Or Paste Batch ID / Slug / URL Directly</label>
-        <div class="input-row">
-          <input type="text" id="batch-id" placeholder="Batch ID, Slug, or URL (e.g. lakshya-jee-2027-181537)" value="678a0324dab28c8848cc026f" />
-          <button class="btn btn-primary" id="btn-fetch-subjects">Fetch Subjects</button>
+        <!-- Filter Tags -->
+        <div class="batch-filter-pills" id="batch-filter-pills">
+          <button type="button" class="pill active" data-filter="all">All</button>
+          <button type="button" class="pill" data-filter="jee">🎯 JEE</button>
+          <button type="button" class="pill" data-filter="neet">🩺 NEET</button>
+          <button type="button" class="pill" data-filter="12">12th</button>
+          <button type="button" class="pill" data-filter="11">11th</button>
+          <button type="button" class="pill" data-filter="jarvis">⚡ PW Jarvis</button>
         </div>
+
+        <!-- Single Unified Smart Search & Paste Input -->
+        <div class="input-row" style="position: relative; margin-top: 6px;">
+          <div style="position: relative; flex: 1;">
+            <input 
+              type="text" 
+              id="batch-id" 
+              placeholder="🔍 Search batch by name, or paste Batch ID / URL..." 
+              value="678a0324dab28c8848cc026f" 
+              autocomplete="off" 
+              style="padding-right: 36px;" 
+            />
+            <button type="button" id="btn-toggle-dropdown" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; color: #9ca3af; cursor: pointer; font-size: 12px; padding: 4px;" title="Browse all batches">▼</button>
+          </div>
+          <button class="btn btn-primary" id="btn-fetch-subjects" style="white-space: nowrap;">Fetch Subjects</button>
+        </div>
+
+        <!-- Modern Floating Autocomplete Dropdown List -->
+        <div id="batch-autocomplete-list" class="batch-autocomplete-dropdown" style="display: none;"></div>
       </div>
 
       <div class="form-group" style="display:none;" id="group-subject">

@@ -50,31 +50,109 @@ function logTerminal(msg, type = '') {
   term.scrollTop = term.scrollHeight;
 }
 
-// --- BATCH SELECTOR & SEARCH SYSTEM ---
+// --- SMART BATCH AUTOCOMPLETE & SELECTION SYSTEM ---
 let allBatchesList = [];
+let activeFilter = 'all';
 
-function renderBatchOptions(list) {
-  const sel = document.getElementById('select-batch');
-  if (!sel) return;
-  const currentVal = sel.value;
-  sel.innerHTML = `<option value="">-- Choose from ${list.length} Available Batches --</option>`;
+function renderAutocompleteList(list) {
+  const dropdown = document.getElementById('batch-autocomplete-list');
+  if (!dropdown) return;
+
+  if (list.length === 0) {
+    dropdown.innerHTML = `
+      <div style="padding: 16px; text-align: center; color: #9ca3af; font-size: 12px;">
+        No batches found matching your search.<br>
+        <span style="font-size: 11px; color: #6b7280;">You can paste any custom Batch ID or URL directly.</span>
+      </div>
+    `;
+    dropdown.style.display = 'block';
+    return;
+  }
+
+  dropdown.innerHTML = '';
+  // Show up to 100 items for snappy performance
+  const displayItems = list.slice(0, 100);
   
-  // Show up to 300 items at a time for fast DOM rendering
-  const displayList = list.slice(0, 300);
-  displayList.forEach(b => {
-    const opt = document.createElement('option');
-    opt.value = b.id;
-    opt.dataset.id = b.id;
-    opt.dataset.slug = b.slug || b.id;
-    opt.dataset.name = b.name;
-    const cat = b.category ? `[${b.category}] ` : '';
-    opt.textContent = `${cat}${b.name}`;
-    sel.appendChild(opt);
+  displayItems.forEach((b) => {
+    const card = document.createElement('div');
+    card.className = 'batch-card';
+    card.dataset.id = b.id;
+    card.dataset.slug = b.slug || b.id;
+    card.dataset.name = b.name;
+    
+    const tagText = b.category || (b.name.toLowerCase().includes('neet') ? 'NEET' : (b.name.toLowerCase().includes('jee') ? 'JEE' : 'Batch'));
+    const subText = b.slug ? `${b.slug} (${b.id.slice(0, 8)}...)` : b.id;
+    
+    card.innerHTML = `
+      <div class="batch-card-main">
+        <div class="batch-card-title">${b.name}</div>
+        <div class="batch-card-sub">${subText}</div>
+      </div>
+      <div class="batch-card-tag">${tagText}</div>
+    `;
+
+    card.addEventListener('click', (e) => {
+      e.stopPropagation();
+      selectBatchItem(b);
+    });
+
+    dropdown.appendChild(card);
   });
 
-  if (currentVal && list.some(b => b.id === currentVal)) {
-    sel.value = currentVal;
+  dropdown.style.display = 'block';
+}
+
+function selectBatchItem(batch) {
+  const input = document.getElementById('batch-id');
+  const serverType = document.getElementById('api-server').value;
+  const batchVal = (serverType === 'pwjarvis' && batch.slug) ? batch.slug : batch.id;
+  
+  input.value = batchVal;
+  window.currentBatchId = batch.id;
+  window.currentBatchSlug = batch.slug || batchVal;
+  
+  // Close dropdown
+  hideAutocomplete();
+  
+  logTerminal(`Selected Batch: ${batch.name} (${batchVal})`, 'ok');
+  document.getElementById('btn-fetch-subjects').click();
+}
+
+function hideAutocomplete() {
+  const dropdown = document.getElementById('batch-autocomplete-list');
+  if (dropdown) dropdown.style.display = 'none';
+}
+
+function filterBatches() {
+  const input = document.getElementById('batch-id');
+  const q = input ? input.value.toLowerCase().trim() : '';
+
+  let filtered = allBatchesList;
+
+  // Apply category pill filter
+  if (activeFilter === 'jee') {
+    filtered = filtered.filter(b => b.name.toLowerCase().includes('jee') || (b.category && b.category.toLowerCase().includes('jee')));
+  } else if (activeFilter === 'neet') {
+    filtered = filtered.filter(b => b.name.toLowerCase().includes('neet') || (b.category && b.category.toLowerCase().includes('neet')));
+  } else if (activeFilter === '12') {
+    filtered = filtered.filter(b => b.name.toLowerCase().includes('12') || (b.category && b.category.includes('12')));
+  } else if (activeFilter === '11') {
+    filtered = filtered.filter(b => b.name.toLowerCase().includes('11') || (b.category && b.category.includes('11')));
+  } else if (activeFilter === 'jarvis') {
+    filtered = filtered.filter(b => b.slug && b.slug !== b.id);
   }
+
+  // Apply search query
+  if (q && !/^[a-f0-9]{24}$/i.test(q) && !q.includes('http')) {
+    filtered = filtered.filter(b =>
+      (b.name && b.name.toLowerCase().includes(q)) ||
+      (b.category && b.category.toLowerCase().includes(q)) ||
+      (b.slug && b.slug.toLowerCase().includes(q)) ||
+      (b.id && b.id.toLowerCase().includes(q))
+    );
+  }
+
+  renderAutocompleteList(filtered);
 }
 
 async function initBatchesDropdown() {
@@ -83,12 +161,13 @@ async function initBatchesDropdown() {
     const res = await fetch(jsonUrl);
     if (res.ok) {
       allBatchesList = await res.json();
+      const badge = document.getElementById('batch-count-badge');
+      if (badge) badge.textContent = `${allBatchesList.length} Batches`;
     }
   } catch(e) {
     console.warn('Failed to load local batches.json, using defaults:', e);
   }
 
-  // Ensure default popular batches exist if json didn't load
   if (!allBatchesList || allBatchesList.length === 0) {
     allBatchesList = [
       { name: 'Lakshya JEE 2027', id: '6779345c20fa0756e4a7fd08', slug: 'lakshya-jee-2027-181537', category: 'IIT-JEE' },
@@ -101,56 +180,101 @@ async function initBatchesDropdown() {
     ];
   }
 
-  renderBatchOptions(allBatchesList);
+  const batchInput = document.getElementById('batch-id');
+  const toggleBtn = document.getElementById('btn-toggle-dropdown');
+  const pills = document.querySelectorAll('.batch-filter-pills .pill');
 
-  const searchInput = document.getElementById('batch-search-input');
-  const selectBatch = document.getElementById('select-batch');
+  // Pill click handling
+  pills.forEach(p => {
+    p.addEventListener('click', () => {
+      pills.forEach(x => x.classList.remove('active'));
+      p.classList.add('active');
+      activeFilter = p.dataset.filter;
+      if (activeFilter === 'jarvis') {
+        document.getElementById('api-server').value = 'pwjarvis';
+      }
+      filterBatches();
+    });
+  });
 
-  if (searchInput) {
-    searchInput.addEventListener('input', (e) => {
-      const q = e.target.value.toLowerCase().trim();
-      
-      // If user pasted a URL or 24-hex Mongo ID directly into search bar
-      const urlMatch = q.match(/(?:batches|batch|details\/|details\?id=)\/?([a-zA-Z0-9_-]+)/);
-      if (urlMatch || /^[a-f0-9]{24}$/i.test(q)) {
-        const detected = urlMatch ? urlMatch[1] : q;
-        document.getElementById('batch-id').value = detected;
-        logTerminal(`Detected ID/URL in search bar: ${detected}`, 'ok');
+  // Toggle dropdown button
+  if (toggleBtn) {
+    toggleBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const dropdown = document.getElementById('batch-autocomplete-list');
+      if (dropdown.style.display === 'block') {
+        hideAutocomplete();
+      } else {
+        filterBatches();
+      }
+    });
+  }
+
+  // Open dropdown on input focus / click
+  if (batchInput) {
+    batchInput.addEventListener('focus', () => {
+      filterBatches();
+    });
+
+    batchInput.addEventListener('input', (e) => {
+      const val = e.target.value.trim();
+      // If user pasted a full URL, extract slug or 24-hex ID
+      const urlMatch = val.match(/(?:batches|batch|details\/|details\?id=)\/?([a-zA-Z0-9_-]+)/);
+      if (urlMatch) {
+        batchInput.value = urlMatch[1];
+        hideAutocomplete();
+        logTerminal(`Extracted from URL: ${urlMatch[1]}`, 'ok');
         document.getElementById('btn-fetch-subjects').click();
         return;
       }
-
-      if (!q) {
-        renderBatchOptions(allBatchesList);
+      // If 24 hex characters, close dropdown (ready to fetch)
+      if (/^[a-f0-9]{24}$/i.test(val)) {
+        hideAutocomplete();
         return;
       }
 
-      const filtered = allBatchesList.filter(b => 
-        (b.name && b.name.toLowerCase().includes(q)) || 
-        (b.category && b.category.toLowerCase().includes(q)) ||
-        (b.slug && b.slug.toLowerCase().includes(q)) ||
-        (b.id && b.id.toLowerCase().includes(q))
-      );
-      renderBatchOptions(filtered);
+      filterBatches();
+    });
+
+    // Keyboard navigation (ArrowDown, ArrowUp, Enter, Escape)
+    batchInput.addEventListener('keydown', (e) => {
+      const dropdown = document.getElementById('batch-autocomplete-list');
+      if (dropdown.style.display !== 'block') return;
+
+      const items = Array.from(dropdown.querySelectorAll('.batch-card'));
+      if (items.length === 0) return;
+
+      let currentIdx = items.findIndex(el => el.classList.contains('active-item'));
+
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (currentIdx >= 0) items[currentIdx].classList.remove('active-item');
+        currentIdx = (currentIdx + 1) % items.length;
+        items[currentIdx].classList.add('active-item');
+        items[currentIdx].scrollIntoView({ block: 'nearest' });
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (currentIdx >= 0) items[currentIdx].classList.remove('active-item');
+        currentIdx = (currentIdx - 1 + items.length) % items.length;
+        items[currentIdx].classList.add('active-item');
+        items[currentIdx].scrollIntoView({ block: 'nearest' });
+      } else if (e.key === 'Enter') {
+        if (currentIdx >= 0 && items[currentIdx]) {
+          e.preventDefault();
+          items[currentIdx].click();
+        }
+      } else if (e.key === 'Escape') {
+        hideAutocomplete();
+      }
     });
   }
 
-  if (selectBatch) {
-    selectBatch.addEventListener('change', () => {
-      const selOpt = selectBatch.options[selectBatch.selectedIndex];
-      if (!selOpt || !selOpt.value) return;
-
-      const serverType = document.getElementById('api-server').value;
-      const batchVal = (serverType === 'pwjarvis' && selOpt.dataset.slug) ? selOpt.dataset.slug : selOpt.dataset.id;
-      
-      document.getElementById('batch-id').value = batchVal;
-      window.currentBatchId = selOpt.dataset.id;
-      window.currentBatchSlug = selOpt.dataset.slug || batchVal;
-      
-      logTerminal(`Selected Batch: ${selOpt.dataset.name || selOpt.text}`, 'ok');
-      document.getElementById('btn-fetch-subjects').click();
-    });
-  }
+  // Close dropdown on outside click
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#batch-autocomplete-list') && e.target.id !== 'batch-id' && e.target.id !== 'btn-toggle-dropdown') {
+      hideAutocomplete();
+    }
+  });
 }
 
 // Auto-detect Batch ID from open PW tabs
