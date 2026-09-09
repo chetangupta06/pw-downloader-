@@ -16,6 +16,7 @@
     /testwave\.cc\/.*master\.m3u8/i,
     /testwave\.cc\/.*master\.mpd/i,
     /(subodhpgcollege|code\.run|streamthorr|pwthor)/i,
+    /\/dash\//i,
     /\/hls\/\d+\/main\.m3u8/i,
     /\/hls\/main\.m3u8/i,
     // Universal Match: Any master playlist with an AWS Policy/Signature

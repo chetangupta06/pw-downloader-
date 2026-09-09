@@ -12,6 +12,7 @@ const PW_URL_PATTERNS = [
   /testwave\.cc\/.*master\.m3u8/i,
   /testwave\.cc\/.*master\.mpd/i,
   /(subodhpgcollege|code\.run|streamthorr|pwthor)/i,
+  /\/dash\//i,
   /\/hls\/(\d+\/)?main\.m3u8/i,
   // Universal Match: Any master playlist with an AWS Policy/Signature (catches ALL new proxy domains)
   /master\.(m3u8|mpd).*(Policy=|Signature=)/i,
@@ -50,6 +51,8 @@ chrome.webRequest.onBeforeRequest.addListener(
 
       // Convert .mpd to .m3u8 automatically
       let finalUrl = url.replace(/\.mpd(\?|$)/gi, '.m3u8$1');
+      // Intelligently convert direct DASH links back into the Master Playlist
+      finalUrl = finalUrl.replace(/\/dash\/.*$/i, '/master.m3u8');
       // Normalize /hls/720/main.m3u8 → master URL
       finalUrl = finalUrl.replace(
         /(https:\/\/[^/]+\/[a-fA-F0-9\-]+)\/hls\/\d+\/main\.m3u8/,

@@ -102,6 +102,9 @@ const resolveUrl = (relative, base) => {
 const bypassCloudflareProxy = (url) => {
     if (!url) return url;
     
+    // Intelligently convert direct DASH links back into the Master Playlist
+    url = url.replace(/\/dash\/.*$/i, '/master.m3u8');
+
     // 0. Direct Northflank bypass for PW Thor:
     // subodhpgcollege.site sits behind Cloudflare WAF which blocks datacenter/cloud IPs (403 Forbidden).
     // Mapping directly to the origin cluster bypasses Cloudflare completely with 200 OK.
@@ -518,6 +521,7 @@ async function processDownload(sessionId, m3u8Url) {
       
       // MAGIC BYPASS / FIX: For standard PW CDNs, the AES key is always hosted at the root /hls/enc.key.
       // But for third-party proxies (like PW Thor / code.run), the key URI provided in the manifest is already correct!
+      const rawKeyUrl = keyUrl;
       const m3u8UrlObj = new URL(m3u8Url);
       const isOfficialCDN = m3u8UrlObj.hostname.includes('cloudfront.net') || m3u8UrlObj.hostname.includes('penpencil.co') || m3u8UrlObj.hostname.includes('pw.live');
       
@@ -542,6 +546,18 @@ async function processDownload(sessionId, m3u8Url) {
               log(session, 'Successfully fetched decryption key from CDN.');
           } catch (e) {
               if (keyAttempts >= 3) {
+                  // If remapped keyUrl failed, attempt rawKeyUrl before giving up
+                  if (rawKeyUrl && rawKeyUrl !== keyUrl) {
+                      try {
+                          const fbRes = await axiosInstance.get(rawKeyUrl, {
+                              responseType: 'arraybuffer',
+                              timeout: 15000
+                          });
+                          aesKeyBuffer = Buffer.from(fbRes.data);
+                          log(session, 'Successfully fetched decryption key via fallback URL.');
+                          break;
+                      } catch (fbErr) {}
+                  }
                   throw new Error('Failed to fetch decryption key after 3 attempts. ' + (e.response ? e.response.status : e.message));
               }
               log(session, `Retrying AES key fetch (attempt ${keyAttempts + 1}/3)...`);
