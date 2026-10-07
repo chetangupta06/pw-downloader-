@@ -16,8 +16,8 @@ function getApiConfig() {
 let cachedVidcloudToken = null;
 let vidcloudTokenExpiry = 0;
 
-async function getVidcloudToken() {
-  if (cachedVidcloudToken && Date.now() < vidcloudTokenExpiry) {
+async function getVidcloudToken(forceRefresh = false) {
+  if (!forceRefresh && cachedVidcloudToken && Date.now() < vidcloudTokenExpiry) {
     return cachedVidcloudToken;
   }
   try {
@@ -29,8 +29,11 @@ async function getVidcloudToken() {
       cachedVidcloudToken = data.access_token || data.token;
       vidcloudTokenExpiry = Date.now() + 10 * 60 * 1000;
       return cachedVidcloudToken;
+    } else {
+      cachedVidcloudToken = null;
     }
   } catch (e) {
+    cachedVidcloudToken = null;
     console.warn("Failed to get Vidcloud token:", e);
   }
   return null;
@@ -466,20 +469,65 @@ async function loadChapters(batchId, subjectId) {
       return;
     }
 
-    allTopics.forEach(t => {
+    let defaultIdx = -1;
+    allTopics.forEach((t, idx) => {
       const opt = document.createElement('option');
       opt.value = t._id || t.slug;
       opt.dataset.slug = t.slug || t._id;
       opt.dataset.id = t._id || t.slug;
-      opt.textContent = t.name;
+
+      const isPdfOnly = /only pdf/i.test(t.name) || /concise notes/i.test(t.name) || /formula sheet/i.test(t.name);
+      const isAssignment = /assignment|practice sheet|dpp/i.test(t.name);
+      const isLecture = /lecture|revision|summary|bridge course|discussion/i.test(t.name) || (!isPdfOnly && !isAssignment);
+      
+      let prefix = '🎥 ';
+      if (isPdfOnly) prefix = '📄 ';
+      else if (isAssignment) prefix = '📝 ';
+      
+      opt.textContent = `${prefix}${t.name}`;
       sel.appendChild(opt);
+
+      if (defaultIdx === -1 && isLecture && !isPdfOnly) {
+        defaultIdx = idx;
+      }
     });
+
+    // Auto-select first lecture chapter if available, or first item
+    if (defaultIdx !== -1) {
+      sel.selectedIndex = defaultIdx;
+    } else {
+      sel.selectedIndex = 0;
+    }
     
     document.getElementById('group-chapter').style.display = 'flex';
     // Clear previous items list when chapter changes
     document.getElementById('step-2').style.display = 'none';
     document.getElementById('video-list').innerHTML = '';
-    logTerminal(`Fetched ${allTopics.length} chapters successfully.`, 'ok');
+    logTerminal(`Fetched ${allTopics.length} chapters successfully. Auto-selected: "${sel.options[sel.selectedIndex]?.textContent}"`, 'ok');
+
+    // Auto-switch content type and auto-load content when chapter changes
+    sel.onchange = () => {
+      const selectedOpt = sel.options[sel.selectedIndex];
+      const optText = selectedOpt ? selectedOpt.textContent : '';
+      const typeSel = document.getElementById('select-type');
+      if (optText.includes('📄') || /only pdf/i.test(optText)) {
+        if (typeSel.value === 'videos') {
+          typeSel.value = 'notes';
+          logTerminal(`Selected PDF chapter: auto-switched Content Type to Class Notes (PDF).`, 'warn');
+        }
+      } else if (optText.includes('🎥')) {
+        if (typeSel.value === 'notes') {
+          typeSel.value = 'videos';
+          logTerminal(`Selected lecture chapter: auto-switched Content Type to Lectures.`, 'ok');
+        }
+      }
+      document.getElementById('btn-fetch-videos').click();
+    };
+
+    // Auto-trigger video loading for the initial selected chapter
+    setTimeout(() => {
+      document.getElementById('btn-fetch-videos').click();
+    }, 150);
   } catch (err) {
     logTerminal(`Error fetching chapters: ${err.message}`, 'err');
   }
@@ -491,6 +539,8 @@ document.getElementById('btn-fetch-videos').addEventListener('click', async () =
   const subjectId = document.getElementById('select-subject').value;
   const topicId = document.getElementById('select-chapter').value;
   const contentType = document.getElementById('select-type').value;
+  const selChapter = document.getElementById('select-chapter');
+  const selectedChapterText = selChapter?.options[selChapter.selectedIndex]?.textContent || '';
   
   if (!topicId) {
     return alert('Please select a chapter first.');
@@ -499,7 +549,7 @@ document.getElementById('btn-fetch-videos').addEventListener('click', async () =
   const api = getApiConfig();
   allVideos = [];
   let page = 1;
-  logTerminal(`Fetching ${contentType} list for selected chapter...`);
+  logTerminal(`Fetching ${contentType} list for "${selectedChapterText}"...`);
   
   while (true) {
     try {
@@ -508,8 +558,10 @@ document.getElementById('btn-fetch-videos').addEventListener('click', async () =
       // 1. Try selected server first if pwthor
       if (api.type === 'pwthor') {
         try {
+          await fetch('https://pwthor.live/api/auth/direct-login', { credentials: 'include' }).catch(() => {});
           const res = await fetch(`${api.base}/api/TopicInfo?BatchId=${batchId}&SubjectId=${subjectId}&TopicId=${topicId}&ContentType=${contentType}&page=${page}`, {
-            headers: { "Content-Type": "application/json" }
+            headers: { "Content-Type": "application/json" },
+            credentials: 'include'
           });
           if (res.ok) {
             const data = await res.json();
@@ -521,14 +573,25 @@ document.getElementById('btn-fetch-videos').addEventListener('click', async () =
       // 2. Try Vidcloud API with auto-generated token (universal across all batches)
       if (vids.length === 0) {
         try {
-          const token = await getVidcloudToken();
+          let token = await getVidcloudToken();
           if (token) {
-            const res = await fetch(`https://vidcloud.eu.org/api/v2/batches/${batchId}/subject/${subjectId}/contents?tag=${topicId}&contentType=${contentType}&page=${page}`, {
+            let res = await fetch(`https://vidcloud.eu.org/api/v2/batches/${batchId}/subject/${subjectId}/contents?tag=${topicId}&contentType=${contentType}&page=${page}`, {
               headers: {
                 'Authorization': `Bearer ${token}`,
                 'client-id': '5eb393ee95fab7468a79d189'
               }
             });
+            if (res.status === 401) {
+              token = await getVidcloudToken(true);
+              if (token) {
+                res = await fetch(`https://vidcloud.eu.org/api/v2/batches/${batchId}/subject/${subjectId}/contents?tag=${topicId}&contentType=${contentType}&page=${page}`, {
+                  headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'client-id': '5eb393ee95fab7468a79d189'
+                  }
+                });
+              }
+            }
             if (res.ok) {
               const data = await res.json();
               vids = data?.data || [];
@@ -569,6 +632,16 @@ document.getElementById('btn-fetch-videos').addEventListener('click', async () =
     }
   }
   
+  // Smart Zero-Item Recovery & Warning
+  if (allVideos.length === 0) {
+    if (contentType === 'videos' && (selectedChapterText.includes('📄') || /only pdf|notes/i.test(selectedChapterText))) {
+      logTerminal(`⚠️ Chapter "${selectedChapterText}" contains 0 video lectures (it is a PDF-only folder). Auto-switching to Class Notes (PDF)...`, 'warn');
+      document.getElementById('select-type').value = 'notes';
+      return document.getElementById('btn-fetch-videos').click();
+    }
+    logTerminal(`No ${contentType} found in "${selectedChapterText}". If this chapter only contains PDFs, please change Content Type to "Class Notes (PDF)".`, 'warn');
+  }
+  
   allVideos.reverse(); // Chronological order
   
   const list = document.getElementById('video-list');
@@ -578,7 +651,13 @@ document.getElementById('btn-fetch-videos').addEventListener('click', async () =
   allVideos.forEach((v, i) => {
     let extractedName = v.topic || v.topicName || v.title || v.name;
     if (!extractedName && v.homeworkIds && v.homeworkIds.length > 0) {
-        extractedName = v.homeworkIds[0].topic || v.homeworkIds[0].note;
+        extractedName = v.homeworkIds[0].topic || v.homeworkIds[0].name || v.homeworkIds[0].note;
+    }
+    if (!extractedName && v.attachmentIds && v.attachmentIds.length > 0) {
+        extractedName = v.attachmentIds[0].name || v.attachmentIds[0].topic;
+    }
+    if (!extractedName && v.videoDetails) {
+        extractedName = v.videoDetails.name || v.videoDetails.title;
     }
     const title = extractedName || `Item ${i+1}`;
     
@@ -658,7 +737,13 @@ async function downloadVideo(vid, index) {
   
   let extractedName = vid.topic || vid.topicName || vid.title || vid.name;
   if (!extractedName && vid.homeworkIds && vid.homeworkIds.length > 0) {
-      extractedName = vid.homeworkIds[0].topic || vid.homeworkIds[0].note;
+      extractedName = vid.homeworkIds[0].topic || vid.homeworkIds[0].name || vid.homeworkIds[0].note;
+  }
+  if (!extractedName && vid.attachmentIds && vid.attachmentIds.length > 0) {
+      extractedName = vid.attachmentIds[0].name || vid.attachmentIds[0].topic;
+  }
+  if (!extractedName && vid.videoDetails) {
+      extractedName = vid.videoDetails.name || vid.videoDetails.title;
   }
   const title = (extractedName || `Item ${index+1}`)
     .replace(/[^a-zA-Z0-9 _-]/g, ' ')
@@ -694,12 +779,18 @@ async function downloadVideo(vid, index) {
         setStatus('Fetching PDF document...', 'active');
         
         let pdfUrl = null;
-        if (vid.homeworkIds && vid.homeworkIds.length > 0) {
+        if (vid.attachmentIds && vid.attachmentIds.length > 0) {
+            const att = vid.attachmentIds[0];
+            if (att.url) pdfUrl = att.url;
+            else if (att.baseUrl && att.key) pdfUrl = att.baseUrl + att.key;
+            else if (att.baseUrl && att.name) pdfUrl = att.baseUrl + att.name;
+        } else if (vid.homeworkIds && vid.homeworkIds.length > 0) {
             const hw = vid.homeworkIds[0];
             if (hw.attachmentIds && hw.attachmentIds.length > 0) {
                 const att = hw.attachmentIds[0];
                 if (att.url) pdfUrl = att.url;
                 else if (att.baseUrl && att.key) pdfUrl = att.baseUrl + att.key;
+                else if (att.baseUrl && att.name) pdfUrl = att.baseUrl + att.name;
             } else if (hw.attachmentUrl) {
                 pdfUrl = hw.attachmentUrl;
             }
