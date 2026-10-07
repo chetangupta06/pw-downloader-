@@ -321,6 +321,28 @@ document.addEventListener('DOMContentLoaded', async () => {
 document.getElementById('btn-fetch-subjects').addEventListener('click', async () => {
   let rawBatch = document.getElementById('batch-id').value.trim();
   if (!rawBatch) return alert('Enter a Batch ID or URL');
+
+  // Direct link parsing (e.g. vidcloud play.php or direct lecture URL)
+  window.targetLectureFilter = null;
+  if (rawBatch.includes('play.php') || rawBatch.includes('batch_id=')) {
+    try {
+      const u = new URL(rawBatch);
+      const bId = u.searchParams.get('batch_id');
+      if (bId) {
+        rawBatch = bId;
+        window.targetLectureFilter = {
+          subjectId: u.searchParams.get('subject_id'),
+          topicId: u.searchParams.get('topic_id'),
+          videoId: u.searchParams.get('video_id'),
+          videoName: u.searchParams.get('video_name')
+        };
+        logTerminal(`Parsed direct lecture link! Target video: ${window.targetLectureFilter.videoName || window.targetLectureFilter.videoId}`, 'ok');
+      }
+    } catch(e) {
+      const m = rawBatch.match(/batch_id=([a-f0-9]{24})/i);
+      if (m) rawBatch = m[1];
+    }
+  }
   
   // Normalize if user pasted a full URL or slug
   const urlMatch = rawBatch.match(/(?:batches|batch|details\/|details\?id=)\/?([a-zA-Z0-9_-]+)/);
@@ -378,10 +400,16 @@ document.getElementById('btn-fetch-subjects').addEventListener('click', async ()
       sel.appendChild(opt);
     });
     
+    // Auto-select target subject if direct link was pasted
+    if (window.targetLectureFilter?.subjectId) {
+      const foundSub = Array.from(sel.options).find(o => o.value === window.targetLectureFilter.subjectId || o.dataset.id === window.targetLectureFilter.subjectId);
+      if (foundSub) sel.value = foundSub.value;
+    }
+
     document.getElementById('group-subject').style.display = 'flex';
     
     const activeBatchId = window.currentBatchId || batchId;
-    // Automatically load chapters for the first subject
+    // Automatically load chapters for the active subject
     if (sel.value) loadChapters(activeBatchId, sel.value);
     sel.onchange = () => loadChapters(activeBatchId, sel.value);
     
@@ -492,7 +520,12 @@ async function loadChapters(batchId, subjectId) {
       }
     });
 
-    // Auto-select first lecture chapter if available, or first item
+    // Auto-select target topic if direct link was pasted, or first lecture chapter
+    if (window.targetLectureFilter?.topicId) {
+      const targetIdx = allTopics.findIndex(t => t._id === window.targetLectureFilter.topicId || t.slug === window.targetLectureFilter.topicId);
+      if (targetIdx !== -1) defaultIdx = targetIdx;
+    }
+
     if (defaultIdx !== -1) {
       sel.selectedIndex = defaultIdx;
     } else {
@@ -693,6 +726,31 @@ document.getElementById('btn-fetch-videos').addEventListener('click', async () =
     checkAll.onchange = (e) => {
       document.querySelectorAll('.video-checkbox').forEach(cb => cb.checked = e.target.checked);
     };
+  }
+
+  // Target lecture auto-selection if pasted direct link
+  if (window.targetLectureFilter?.videoId) {
+    const targetVidId = window.targetLectureFilter.videoId;
+    let foundIndex = -1;
+    allVideos.forEach((v, idx) => {
+      const match = v._id === targetVidId || (v.videoDetails && v.videoDetails.id === targetVidId);
+      const cb = document.querySelector(`.video-checkbox[data-index="${idx}"]`);
+      if (cb) cb.checked = match;
+      if (match) foundIndex = idx;
+    });
+
+    if (foundIndex !== -1) {
+      if (checkAll) checkAll.checked = false;
+      setTimeout(() => {
+        const itemEl = document.getElementById(`vid-${foundIndex}`);
+        if (itemEl) {
+          itemEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          itemEl.style.border = '2px solid #7c3aed';
+          itemEl.style.background = 'rgba(124, 58, 237, 0.2)';
+        }
+      }, 150);
+      logTerminal(`🎯 Auto-targeted lecture: "${window.targetLectureFilter.videoName || 'Lecture'}"! Ready to download.`, 'ok');
+    }
   }
 });
 

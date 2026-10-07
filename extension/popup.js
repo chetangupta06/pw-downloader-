@@ -267,6 +267,11 @@ if (document.getElementById('btn-manual-fetch')) {
   document.getElementById('btn-manual-fetch').addEventListener('click', () => {
     const manualUrl = document.getElementById('manual-url-input').value.trim();
     if (manualUrl) {
+      if (manualUrl.includes('play.php')) {
+        chrome.tabs.create({ url: manualUrl, active: true });
+        window.close();
+        return;
+      }
       detectedUrl = manualUrl;
       detectedTitle = 'Manual_Download';
       document.getElementById('url-display').textContent = manualUrl;
