@@ -15,7 +15,7 @@
     /cloudfront\.net\/.*master\.mpd/i,
     /testwave\.cc\/.*master\.m3u8/i,
     /testwave\.cc\/.*master\.mpd/i,
-    /(subodhpgcollege|code\.run|streamthorr|pwthor)/i,
+    /(subodhpgcollege|code\.run|streamthorr|pwthor|streamvideo\.co\.in)/i,
     /\/dash\//i,
     /\/hls\/\d+\/main\.m3u8/i,
     /\/hls\/main\.m3u8/i,

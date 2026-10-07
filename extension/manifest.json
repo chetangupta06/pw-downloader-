@@ -41,7 +41,8 @@
         "*://*.rarestudy.in/*",
         "*://*.samfygros.com/*",
         "*://*.pwthor.live/*",
-        "*://*.pwjarvis.com/*"
+        "*://*.pwjarvis.com/*",
+        "*://*.streamvideo.co.in/*"
       ],
       "js": ["content.js"],
       "run_at": "document_start"

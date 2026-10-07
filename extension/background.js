@@ -6,7 +6,7 @@ const PW_URL_PATTERNS = [
   /master\.mpd(\?|$)/i,
   /\/hls\/\d+\/main\.m3u8/i,
   /\/dash\//i,
-  /(subodhpgcollege|code\.run|streamthorr)/i,
+  /(subodhpgcollege|code\.run|streamthorr|streamvideo\.co\.in)/i,
   /cors\.pwjarvis\.com/i,
   /\/video\/[a-f0-9]+\/\d+p\/video\.mp4/i,
 ];
@@ -22,6 +22,8 @@ function recordUrl(tabId, url) {
     url.includes('/dash/') ||
     url.includes('subodhpgcollege') ||
     url.includes('code.run') ||
+    url.includes('streamthorr') ||
+    url.includes('streamvideo.co.in') ||
     url.includes('cors.pwjarvis.com') ||
     url.includes('/video.mp4') ||
     /\/hls\/\d+\/main\.m3u8/.test(url);
@@ -32,10 +34,7 @@ function recordUrl(tabId, url) {
   if (!url.includes('cors.pwjarvis.com') && !url.includes('.mp4')) {
     finalUrl = finalUrl.replace(/\.mpd(\?|$)/gi, '.m3u8$1');
     finalUrl = finalUrl.replace(/\/dash\/.*$/i, '/master.m3u8');
-    finalUrl = finalUrl.replace(
-      /(https:\/\/[^/]+\/[a-fA-F0-9\-]+)\/hls\/\d+\/main\.m3u8/,
-      '$1/hls/720/main.m3u8'
-    );
+    finalUrl = finalUrl.replace(/\/hls\/\d+\/main\.m3u8/i, '/hls/720/main.m3u8');
   }
 
   const entry = { url: finalUrl, title: 'PW_Lecture', timestamp: Date.now() };
@@ -135,7 +134,7 @@ async function setupStreamHeaderRules() {
         ]
       },
       condition: {
-        regexFilter: "^https?://[^/]*(subodhpgcollege|code\\.run|streamthorr)[^/]*/.*",
+        regexFilter: "^https?://[^/]*(subodhpgcollege|code\\.run|streamthorr|streamvideo\\.co\\.in)[^/]*/.*",
         resourceTypes: ["xmlhttprequest", "media", "other"]
       }
     },

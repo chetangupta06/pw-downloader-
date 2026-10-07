@@ -933,8 +933,8 @@ async function downloadVideo(vid, index) {
     // Bypass proxy servers (like testwave.cc) and fetch directly from CloudFront to avoid Origin blocks
     signedUrl = signedUrl.replace(/^https?:\/\/[^\/]+\/play\/(d1d34p8vz63oiq\.cloudfront\.net.*)/i, 'https://$1');
     
-    // Revive dead Northflank/code.run domains back to the live Thor streaming server
-    signedUrl = signedUrl.replace(/https?:\/\/[^\/]*code\.run/gi, 'https://stream.subodhpgcollege.site');
+    // Revive dead Northflank/code.run / subodhpgcollege domains back to live streamvideo server
+    signedUrl = signedUrl.replace(/https?:\/\/[^\/]*(code\.run|subodhpgcollege\.site)/gi, 'https://streamvideo.co.in');
 
     // Intelligently convert direct DASH links back into the Master Playlist
     signedUrl = signedUrl.replace(/\/dash\/.*$/i, '/master.m3u8');
@@ -958,6 +958,9 @@ async function downloadVideo(vid, index) {
         } else if (signedUrl.includes('rarestudy')) {
             targetReferer = 'https://rarestudy.in/';
             targetOrigin = 'https://rarestudy.in';
+        } else if (signedUrl.includes('streamvideo') || signedUrl.includes('subodhpgcollege') || signedUrl.includes('code.run') || signedUrl.includes('streamthorr')) {
+            targetReferer = 'https://pwthor.live/';
+            targetOrigin = 'https://pwthor.live';
         }
         
         if (chrome.declarativeNetRequest && chrome.declarativeNetRequest.updateDynamicRules) {
@@ -1045,15 +1048,22 @@ async function downloadVideo(vid, index) {
                 const origBest = new URL(bestQualityUrl);
                 origBest.searchParams.forEach((v, k) => tempAes.searchParams.set(k, v));
                 let finalAesUrl = tempAes.href;
-                finalAesUrl = finalAesUrl.replace(/https?:\/\/[^\/]*code\.run/gi, 'https://stream.subodhpgcollege.site');
+                finalAesUrl = finalAesUrl.replace(/https?:\/\/[^\/]*(code\.run|subodhpgcollege\.site)/gi, 'https://streamvideo.co.in');
                 aesKeyUrl = finalAesUrl;
                 aesKeyFallbackUrl = finalAesUrl;
                 
-                // Force map "enc.key" to the root /hls/ directory (where PW stores it), bypassing proxy prefixes safely
-                if (uriMatch[1] === "enc.key" && bestQualityUrl.includes("/hls/")) {
+                // If stream server hosts enc.key at /hls/enc.key (e.g. streamvideo.co.in, PW Thor proxies, etc.)
+                if (bestQualityUrl.includes("/hls/")) {
                     const keyUrlObj = new URL(bestQualityUrl);
                     keyUrlObj.pathname = keyUrlObj.pathname.replace(/\/hls\/[^/]+\/[^/]+$/, '/hls/enc.key');
-                    aesKeyUrl = keyUrlObj.href;
+                    const proxyKeyUrl = keyUrlObj.href;
+
+                    if (uriMatch[1] === "enc.key" || bestQualityUrl.includes("streamvideo") || bestQualityUrl.includes("subodhpgcollege") || bestQualityUrl.includes("streamthorr") || bestQualityUrl.includes("code.run")) {
+                        aesKeyUrl = proxyKeyUrl;
+                        aesKeyFallbackUrl = finalAesUrl;
+                    } else {
+                        aesKeyFallbackUrl = proxyKeyUrl;
+                    }
                 }
             }
             const ivMatch = lines[j].match(/IV=0x([0-9a-fA-F]{32})/);
@@ -1067,7 +1077,7 @@ async function downloadVideo(vid, index) {
             const origBest = new URL(bestQualityUrl);
             origBest.searchParams.forEach((v, k) => segUrl.searchParams.set(k, v));
             let finalSegUrl = segUrl.href;
-            finalSegUrl = finalSegUrl.replace(/https?:\/\/[^\/]*code\.run/gi, 'https://stream.subodhpgcollege.site');
+            finalSegUrl = finalSegUrl.replace(/https?:\/\/[^\/]*(code\.run|subodhpgcollege\.site)/gi, 'https://streamvideo.co.in');
             segments.push(finalSegUrl);
         }
     }
@@ -1079,18 +1089,27 @@ async function downloadVideo(vid, index) {
     // Step 4.3: Fetch AES Key if needed
     if (aesKeyUrl) {
         setStatus('Fetching AES decryption key...', 'active');
+        const storedToken = (await chrome.storage.local.get(['pw_token']))?.pw_token;
+        const getKeyHeaders = (url) => {
+            const h = {};
+            if (storedToken && url.includes('penpencil.co')) {
+                h['Authorization'] = storedToken.startsWith('Bearer ') ? storedToken : `Bearer ${storedToken}`;
+            }
+            return h;
+        };
+
         let kRes = null;
         for (let attempt = 1; attempt <= 3; attempt++) {
             try {
-                kRes = await fetch(aesKeyUrl);
+                kRes = await fetch(aesKeyUrl, { headers: getKeyHeaders(aesKeyUrl) });
                 if (kRes.ok) break;
             } catch(e) {}
             if (attempt < 3) await new Promise(r => setTimeout(r, 600));
         }
-        // Fallback: if root /hls/enc.key failed (e.g. 404), try direct relative key path
+        // Fallback: if primary key URL failed (e.g. 401 or 404), try fallback key path
         if ((!kRes || !kRes.ok) && aesKeyFallbackUrl && aesKeyFallbackUrl !== aesKeyUrl) {
             try {
-                const fbRes = await fetch(aesKeyFallbackUrl);
+                const fbRes = await fetch(aesKeyFallbackUrl, { headers: getKeyHeaders(aesKeyFallbackUrl) });
                 if (fbRes.ok) kRes = fbRes;
             } catch(e) {}
         }

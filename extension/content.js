@@ -9,7 +9,7 @@
     /master\.mpd(\?|$)/i,
     /\/hls\/\d+\/main\.m3u8/i,
     /\/dash\//i,
-    /(subodhpgcollege|code\.run|streamthorr)/i,
+    /(subodhpgcollege|code\.run|streamthorr|streamvideo\.co\.in)/i,
     /cors\.pwjarvis\.com/i,
     /\/video\/[a-f0-9]+\/\d+p\/video\.mp4/i,
   ];
@@ -95,7 +95,7 @@
 
   // --- Auto clicker for Android/Windows popup and video autoplay ---
   function initAutoClicker() {
-    const allowedDomains = ['vidcloud.eu.org', 'rarestudy.in', 'samfygros.com', 'pwthor.live', 'pwjarvis.com'];
+    const allowedDomains = ['vidcloud.eu.org', 'rarestudy.in', 'samfygros.com', 'pwthor.live', 'pwjarvis.com', 'streamvideo.co.in'];
     if (!allowedDomains.some(d => window.location.hostname.includes(d))) return;
     
     const clickerInterval = setInterval(() => {
