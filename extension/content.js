@@ -16,6 +16,8 @@
 
   function checkAndReport(url) {
     if (!url || typeof url !== 'string') return;
+    if (/\.(ts|m4s|aac|key|vtt|srt|jpg|jpeg|png|webp|svg|ico|css|woff2?|js|json)(\?|$)/i.test(url)) return;
+    if (url.includes('/enc.key') || url.includes('/get-hls-key')) return;
     if (PW_PATTERNS.some((p) => p.test(url))) {
       chrome.runtime.sendMessage({ type: 'SET_URL', url }, () => {
         // Ignore errors (e.g., background not ready)

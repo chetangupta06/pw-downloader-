@@ -26,6 +26,8 @@
 function checkAndReport(text) {
   if (!text || typeof text !== 'string') return;
   if (text.startsWith('blob:')) return; // Ignore blob wrappers
+  if (/\.(ts|m4s|aac|key|vtt|srt|jpg|jpeg|png|webp|svg|ico|css|woff2?|js|json)(\?|$)/i.test(text)) return;
+  if (text.includes('/enc.key') || text.includes('/get-hls-key')) return;
   
   let foundUrl = text;
   // If the text is JSON, try to extract the URL from inside it

@@ -16,16 +16,21 @@ const detectedUrls = {};
 let latestDetectedUrl = null;
 
 function recordUrl(tabId, url) {
+  // Ignore non-video assets, segments, keys, subtitles
+  if (/\.(ts|m4s|aac|key|vtt|srt|jpg|jpeg|png|webp|svg|ico|css|woff2?|js|json)(\?|$)/i.test(url)) return;
+  if (url.includes('/enc.key') || url.includes('/get-hls-key')) return;
+
   const isMasterUrl =
     url.includes('master.m3u8') ||
     url.includes('master.mpd') ||
     url.includes('/dash/') ||
+    url.includes('/main.m3u8') ||
+    url.includes('/video.mp4') ||
+    url.includes('streamvideo.co.in/stream/') ||
     url.includes('subodhpgcollege') ||
     url.includes('code.run') ||
     url.includes('streamthorr') ||
-    url.includes('streamvideo.co.in') ||
-    url.includes('cors.pwjarvis.com') ||
-    url.includes('/video.mp4') ||
+    (url.includes('cors.pwjarvis.com') && url.includes('.mp4')) ||
     /\/hls\/\d+\/main\.m3u8/.test(url);
 
   if (!isMasterUrl) return;
@@ -35,6 +40,11 @@ function recordUrl(tabId, url) {
     finalUrl = finalUrl.replace(/\.mpd(\?|$)/gi, '.m3u8$1');
     finalUrl = finalUrl.replace(/\/dash\/.*$/i, '/master.m3u8');
     finalUrl = finalUrl.replace(/\/hls\/\d+\/main\.m3u8/i, '/hls/720/main.m3u8');
+  }
+
+  // If on streamvideo.co.in or Thor stream server, ensure it resolves to /hls/720/main.m3u8
+  if (finalUrl.includes('streamvideo.co.in/stream/') && !finalUrl.includes('main.m3u8')) {
+    finalUrl = finalUrl.replace(/(https:\/\/[^/]+\/stream\/[^/]+).*/i, '$1/hls/720/main.m3u8');
   }
 
   const entry = { url: finalUrl, title: 'PW_Lecture', timestamp: Date.now() };

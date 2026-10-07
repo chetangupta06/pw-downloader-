@@ -874,57 +874,166 @@ async function downloadVideo(vid, index) {
         throw new Error(signedUrl || 'Extraction timed out or returned null.');
     }
 
+    logTerminal(`[${sanitizedTitle}] Intercepted stream: ${signedUrl}`, 'ok');
+
     // DIRECT MP4 STREAMING ENGINE (PW Jarvis & direct mp4 files)
-    const isDirectMp4 = signedUrl.includes('cors.pwjarvis.com') || (signedUrl.includes('.mp4') && !signedUrl.includes('.m3u8'));
+    const isDirectMp4 = (signedUrl.includes('cors.pwjarvis.com') && signedUrl.includes('.mp4')) || 
+                        (signedUrl.includes('.mp4') && !signedUrl.includes('.m3u8') && !signedUrl.includes('.ts'));
 
     if (isDirectMp4) {
-        setStatus('Streaming direct MP4...', 'active');
+        setStatus('Connecting to MP4 stream...', 'active');
         progWrap.style.display = 'block';
         updateProgress(0, 'Connecting...');
 
-        const videoRes = await fetch(signedUrl);
-        if (!videoRes.ok) throw new Error(`Video fetch HTTP ${videoRes.status}: ${videoRes.statusText}`);
+        // Step 1: Probe file to determine total size and Range support
+        let totalBytes = 0;
+        let supportsRange = false;
+        try {
+            const probeRes = await fetch(signedUrl, {
+                headers: { 'Range': 'bytes=0-0' }
+            });
+            if (probeRes.status === 206) {
+                supportsRange = true;
+                const cr = probeRes.headers.get('content-range');
+                if (cr) {
+                    const m = cr.match(/\/(\d+)/);
+                    if (m) totalBytes = parseInt(m[1]);
+                }
+            } else if (probeRes.ok) {
+                totalBytes = parseInt(probeRes.headers.get('content-length')) || 0;
+                if (probeRes.headers.get('accept-ranges') === 'bytes') supportsRange = true;
+            }
+        } catch(e) {
+            console.warn("Probe request failed:", e);
+        }
 
-        const totalBytes = parseInt(videoRes.headers.get('content-length')) || 0;
-        const totalMbStr = totalBytes ? ` / ${(totalBytes / (1024 * 1024)).toFixed(1)} MB` : '';
+        if (!totalBytes) {
+            try {
+                const headRes = await fetch(signedUrl, { method: 'HEAD' });
+                if (headRes.ok) {
+                    totalBytes = parseInt(headRes.headers.get('content-length')) || 0;
+                    if (headRes.headers.get('accept-ranges') === 'bytes') supportsRange = true;
+                }
+            } catch(e) {}
+        }
 
         const fileHandle = await dirHandle.getFileHandle(finalFilename, { create: true });
         const writable = await fileHandle.createWritable();
 
-        const reader = videoRes.body.getReader();
         let downloadedBytes = 0;
         let lastTime = Date.now();
         let lastBytes = 0;
         let currentSpeed = '0.00';
 
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            await writable.write(value);
-            downloadedBytes += value.length;
-
+        const updateSpeedAndProgress = () => {
             const now = Date.now();
             if (now - lastTime >= 400) {
                 const durationSec = (now - lastTime) / 1000;
                 const bytesDiff = downloadedBytes - lastBytes;
-                const speedMbps = (bytesDiff / (1024 * 1024) / durationSec).toFixed(2);
-                currentSpeed = speedMbps;
+                currentSpeed = (bytesDiff / (1024 * 1024) / durationSec).toFixed(2);
                 lastTime = now;
                 lastBytes = downloadedBytes;
             }
-
+            const dlMb = (downloadedBytes / (1024 * 1024)).toFixed(1);
             if (totalBytes > 0) {
                 const pct = Math.min(100, Math.floor((downloadedBytes / totalBytes) * 100));
-                const dlMb = (downloadedBytes / (1024 * 1024)).toFixed(1);
-                updateProgress(pct, `${dlMb}${totalMbStr} @ ${currentSpeed} MB/s`);
+                const totalMb = (totalBytes / (1024 * 1024)).toFixed(1);
+                updateProgress(pct, `${dlMb} / ${totalMb} MB @ ${currentSpeed} MB/s`);
             } else {
-                const dlMb = (downloadedBytes / (1024 * 1024)).toFixed(1);
-                updateProgress(100, `${dlMb} MB @ ${currentSpeed} MB/s`);
+                updateProgress(50, `${dlMb} MB @ ${currentSpeed} MB/s`);
+            }
+        };
+
+        // Method A: Chunked Range-Based Download (if Range supported and file > 1MB)
+        if (supportsRange && totalBytes > 1024 * 1024) {
+            setStatus('Downloading MP4 (Chunked Engine)...', 'active');
+            const CHUNK_SIZE = 5 * 1024 * 1024; // 5 MB chunks
+            
+            while (downloadedBytes < totalBytes) {
+                const end = Math.min(downloadedBytes + CHUNK_SIZE - 1, totalBytes - 1);
+                let chunkSuccess = false;
+                
+                for (let attempt = 1; attempt <= 4; attempt++) {
+                    try {
+                        const chunkRes = await fetch(signedUrl, {
+                            headers: { 'Range': `bytes=${downloadedBytes}-${end}` }
+                        });
+                        if (!chunkRes.ok && chunkRes.status !== 206) {
+                            throw new Error(`HTTP ${chunkRes.status}`);
+                        }
+                        const chunkBuf = await chunkRes.arrayBuffer();
+                        if (chunkBuf.byteLength > 0) {
+                            await writable.write(chunkBuf);
+                            downloadedBytes += chunkBuf.byteLength;
+                            updateSpeedAndProgress();
+                            chunkSuccess = true;
+                            break;
+                        }
+                    } catch(err) {
+                        console.warn(`Chunk ${downloadedBytes}-${end} attempt ${attempt} failed:`, err);
+                        if (attempt < 4) await new Promise(r => setTimeout(r, 800));
+                    }
+                }
+                
+                if (!chunkSuccess) {
+                    await writable.close();
+                    throw new Error(`Failed to download video chunk at offset ${(downloadedBytes/(1024*1024)).toFixed(1)} MB`);
+                }
+            }
+        } else {
+            // Method B: Stream Reader with Resume Support
+            setStatus('Streaming direct MP4...', 'active');
+            
+            while (totalBytes === 0 || downloadedBytes < totalBytes) {
+                const fetchHeaders = {};
+                if (downloadedBytes > 0) {
+                    fetchHeaders['Range'] = `bytes=${downloadedBytes}-`;
+                }
+                
+                const streamRes = await fetch(signedUrl, { headers: fetchHeaders });
+                if (!streamRes.ok && streamRes.status !== 206) {
+                    if (downloadedBytes > 0 && streamRes.status === 416) {
+                        break; // Reached end of file
+                    }
+                    throw new Error(`Video fetch HTTP ${streamRes.status}: ${streamRes.statusText}`);
+                }
+
+                if (!totalBytes) {
+                    const cr = streamRes.headers.get('content-range');
+                    if (cr) {
+                        const m = cr.match(/\/(\d+)/);
+                        if (m) totalBytes = parseInt(m[1]);
+                    }
+                    if (!totalBytes) {
+                        totalBytes = parseInt(streamRes.headers.get('content-length')) || 0;
+                    }
+                }
+
+                const reader = streamRes.body.getReader();
+                let bytesReadInThisStream = 0;
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    await writable.write(value);
+                    downloadedBytes += value.length;
+                    bytesReadInThisStream += value.length;
+                    updateSpeedAndProgress();
+                }
+
+                if (totalBytes > 0 && downloadedBytes >= totalBytes) break;
+                if (bytesReadInThisStream === 0) break;
             }
         }
 
         await writable.close();
+
+        // Safety verification: A video cannot be smaller than 1 MB
+        if (downloadedBytes < 1024 * 1024) {
+            throw new Error(`Downloaded file is only ${(downloadedBytes / 1024).toFixed(1)} KB (stream was truncated by server). Please retry.`);
+        }
+
         updateProgress(100, `Done (${(downloadedBytes / (1024 * 1024)).toFixed(1)} MB)`);
         setStatus('Saved Successfully!', 'success');
         return;
@@ -935,6 +1044,13 @@ async function downloadVideo(vid, index) {
     
     // Revive dead Northflank/code.run / subodhpgcollege domains back to live streamvideo server
     signedUrl = signedUrl.replace(/https?:\/\/[^\/]*(code\.run|subodhpgcollege\.site)/gi, 'https://streamvideo.co.in');
+
+    // If a segment or key was intercepted on an HLS path, restore it back to main.m3u8
+    if (signedUrl.includes('/hls/') && !signedUrl.includes('main.m3u8')) {
+        signedUrl = signedUrl.replace(/\/hls\/.*/i, '/hls/720/main.m3u8');
+    } else if (signedUrl.includes('streamvideo.co.in/stream/') && !signedUrl.includes('main.m3u8')) {
+        signedUrl = signedUrl.replace(/(https:\/\/[^/]+\/stream\/[^/]+).*/i, '$1/hls/720/main.m3u8');
+    }
 
     // Intelligently convert direct DASH links back into the Master Playlist
     signedUrl = signedUrl.replace(/\/dash\/.*$/i, '/master.m3u8');
