@@ -969,17 +969,21 @@ async function downloadVideo(vid, index) {
             params.append('video_type', 'pw');
             watchUrl = `https://s3-cdn.samfygros.com/play.php?${params.toString()}`;
         } else {
+            const realBatchId = window.currentBatchId || document.getElementById('batch-id').value.trim();
+            const realSubjectId = document.getElementById('select-subject').value;
+            const realTopicId = document.getElementById('select-chapter').value;
+            const realTypeId = (vid.videoDetails && (vid.videoDetails._id || vid.videoDetails.id)) || vid.typeId || actualTypeId || actualVideoId;
+
             const params = new URLSearchParams();
-            // Hardcode known working IDs to bypass Vidcloud's database restrictions for new batches
-            params.append('batch_id', '6779346f920e596fe7f0e247');
+            params.append('batch_id', realBatchId);
             params.append('program_id', '');
-            params.append('subject_id', '69bebcb933cb41ec09dfcc85');
-            params.append('topic_id', '69ccc6b5a01f2569524bfa63');
+            params.append('subject_id', realSubjectId);
+            params.append('topic_id', realTopicId);
             params.append('video_id', actualVideoId);
-            params.append('typeId', '6a7b1718f83a03099af69b2b');
-            params.append('video_url', actualVideoUrl || '');
+            params.append('typeId', realTypeId);
+            if (actualVideoUrl) params.append('video_url', actualVideoUrl);
             params.append('video_name', title);
-            params.append('video_img', actualImage);
+            if (actualImage) params.append('video_img', actualImage);
             params.append('video_type', 'new');
             params.append('play_type', actualPlayType);
             
@@ -987,7 +991,9 @@ async function downloadVideo(vid, index) {
         }
     }
 
-    
+    // Always clear old state before starting extraction of a new video
+    await new Promise(r => chrome.runtime.sendMessage({ type: 'CLEAR_URL', tabId: -1 }, r));
+
     // Create an off-screen popup window so the player's visibility checks pass without stealing focus
     let tab = null;
     let winId = null;
@@ -1008,11 +1014,6 @@ async function downloadVideo(vid, index) {
         // Fallback for Android browsers like Kiwi or Lemur which do not support multiple windows
         tab = await chrome.tabs.create({ url: watchUrl, active: false });
     }
-    
-    // Clear any previously stored URL for this specific tab if exists
-    if (tab && tab.id) {
-        await new Promise(r => chrome.runtime.sendMessage({ type: 'CLEAR_URL', tabId: tab.id }, r));
-    }
 
     // Content.js automatically handles auto-clicking and muted play on the background tab
 
@@ -1025,15 +1026,17 @@ async function downloadVideo(vid, index) {
         attempts++;
         
         try {
-            // 1. Check for full captured playlist first
+            // 1. Check for full captured playlist first (with strict timestamp check)
             const plResp = await new Promise(r => chrome.runtime.sendMessage({ 
                 type: 'GET_PLAYLIST', 
-                tabId: tab ? tab.id : -1 
+                tabId: tab ? tab.id : -1,
+                since: startTime 
             }, r));
             if (plResp && plResp.playlist) {
                 signedUrl = plResp.playlist;
                 break;
             }
+
 
             // 2. Check for intercepted video URL
             const resp = await new Promise(r => chrome.runtime.sendMessage({ 

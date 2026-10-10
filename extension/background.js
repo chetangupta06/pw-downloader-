@@ -119,8 +119,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === 'CLEAR_URL') {
     const tabId = message.tabId;
-    delete detectedUrls[tabId];
+    if (tabId && tabId > 0) {
+      delete detectedUrls[tabId];
+      delete detectedPlaylists[tabId];
+    } else {
+      // Clear all cached state if tabId <= 0
+      for (const k in detectedUrls) delete detectedUrls[k];
+      for (const k in detectedPlaylists) delete detectedPlaylists[k];
+    }
     latestDetectedUrl = null;
+    latestDetectedPlaylist = null;
     if (tabId && tabId > 0) {
       chrome.action.setBadgeText({ text: '', tabId });
       chrome.action.setTitle({ title: 'PW Lecture Downloader', tabId });
@@ -148,12 +156,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === 'GET_PLAYLIST') {
     const tabId = message.tabId;
-    let data = detectedPlaylists[tabId] || latestDetectedPlaylist;
+    const since = message.since || 0;
+    let data = (tabId && tabId > 0) ? detectedPlaylists[tabId] : null;
+    if (!data && latestDetectedPlaylist && latestDetectedPlaylist.timestamp >= since) {
+      data = latestDetectedPlaylist;
+    }
+    if (!data) {
+      for (const id in detectedPlaylists) {
+        if (detectedPlaylists[id] && detectedPlaylists[id].timestamp >= since) {
+          data = detectedPlaylists[id];
+          break;
+        }
+      }
+    }
     sendResponse({ playlist: data ? data.playlist : null, title: data ? data.title : null });
   }
 
   return true; // Keep the message channel open for async
 });
+
 
 
 // Clean up when a tab is closed
