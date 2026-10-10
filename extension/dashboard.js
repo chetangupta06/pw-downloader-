@@ -1380,9 +1380,15 @@ async function downloadVideo(vid, index) {
         } else if (lines[j].startsWith('#EXT-X-MEDIA-SEQUENCE:')) {
             mediaSequence = parseInt(lines[j].split(':')[1]);
         } else if (lines[j].startsWith('#EXTINF:')) {
-            const segUrl = new URL(lines[j+1].trim(), bestQualityUrl);
+            const rawSeg = lines[j+1].trim();
+            const segUrl = new URL(rawSeg, bestQualityUrl);
             const origBest = new URL(bestQualityUrl);
-            origBest.searchParams.forEach((v, k) => segUrl.searchParams.set(k, v));
+            // ONLY copy searchParams if segUrl does not already have its own signature/policy
+            origBest.searchParams.forEach((v, k) => {
+                if (!segUrl.searchParams.has(k)) {
+                    segUrl.searchParams.set(k, v);
+                }
+            });
             let finalSegUrl = segUrl.href;
             finalSegUrl = finalSegUrl.replace(/https?:\/\/[^\/]*(code\.run|subodhpgcollege\.site)/gi, 'https://streamvideo.co.in');
             segments.push(finalSegUrl);
@@ -1392,6 +1398,32 @@ async function downloadVideo(vid, index) {
     if (segments.length === 0) {
         throw new Error("No segments found. Content: " + mediaManifest.substring(0, 300));
     }
+
+    // Ensure DNR rule covers the segment host as well if it differs from streamHost
+    try {
+        const segHost = new URL(segments[0]).hostname;
+        if (segHost && segHost !== streamHost && chrome.declarativeNetRequest && chrome.declarativeNetRequest.updateDynamicRules) {
+            await chrome.declarativeNetRequest.updateDynamicRules({
+                removeRuleIds: [9998],
+                addRules: [{
+                    id: 9998,
+                    priority: 100,
+                    action: {
+                        type: "modifyHeaders",
+                        requestHeaders: [
+                            { header: "Referer", operation: "set", value: targetReferer },
+                            { header: "Origin", operation: "set", value: targetOrigin }
+                        ]
+                    },
+                    condition: {
+                        urlFilter: `||${segHost}`,
+                        resourceTypes: ["xmlhttprequest", "media", "other"]
+                    }
+                }]
+            });
+        }
+    } catch(e) {}
+
     
     // Step 4.3: Fetch AES Key if needed
     if (aesKeyUrl) {
@@ -1441,7 +1473,8 @@ async function downloadVideo(vid, index) {
     const fileHandle = await dirHandle.getFileHandle(finalFilename, { create: true });
     const writable = await fileHandle.createWritable();
     
-    const CONCURRENCY = 35; // 35 parallel streams for maximum network saturation
+    const isCdn = bestQualityUrl.includes('testwave.cc') || bestQualityUrl.includes('bunny-cdn') || bestQualityUrl.includes('cloudfront.net');
+    const CONCURRENCY = isCdn ? 6 : 25; // 6 parallel streams for CDN avoids 403 rate limits
     const downloadedMap = new Map();
     let nextWriteIndex = 0;
     let nextDownloadIndex = 0;
@@ -1500,16 +1533,20 @@ async function downloadVideo(vid, index) {
             let segRes = null;
             let lastErr = null;
 
-            for (let attempt = 1; attempt <= 3; attempt++) {
+            for (let attempt = 1; attempt <= 6; attempt++) {
                 try {
                     segRes = await fetch(url);
                     if (segRes.ok) break;
                     lastErr = new Error(`HTTP ${segRes.status}`);
+                    if (segRes.status === 403) {
+                        // Exponential backoff for CloudFront / CDN rate-limit
+                        await new Promise(r => setTimeout(r, 800 * attempt));
+                    }
                 } catch(e) {
                     lastErr = e;
                 }
-                if (attempt < 3) {
-                    await new Promise(r => setTimeout(r, 150 * attempt));
+                if (attempt < 6) {
+                    await new Promise(r => setTimeout(r, 300 * attempt));
                 }
             }
 
@@ -1517,6 +1554,7 @@ async function downloadVideo(vid, index) {
                 downloadError = new Error(`Failed to fetch segment ${j + 1} (${lastErr?.message || 'network error'})`);
                 throw downloadError;
             }
+
 
             let buffer = await segRes.arrayBuffer();
 
