@@ -284,6 +284,18 @@ async function initBatchesDropdown() {
 document.addEventListener('DOMContentLoaded', async () => {
   initBatchesDropdown();
 
+
+  // Check URL query parameters (e.g. ?autolink=... sent from popup)
+  const urlParams = new URLSearchParams(window.location.search);
+  const autolink = urlParams.get('autolink');
+  if (autolink) {
+    document.getElementById('batch-id').value = autolink;
+    logTerminal(`Loading pasted link: ${autolink}`, 'ok');
+    document.getElementById('btn-fetch-subjects').click();
+    return;
+  }
+
+
   try {
     const tabs = await chrome.tabs.query({});
     // Prioritize active tabs
@@ -1025,36 +1037,41 @@ async function downloadVideo(vid, index) {
 
     logTerminal(`[${sanitizedTitle}] Intercepted stream: ${signedUrl}`, 'ok');
 
-    // DIRECT MP4 STREAMING ENGINE (PW Jarvis & direct mp4 files)
+    // DIRECT MP4 STREAMING ENGINE (PW Jarvis, testwave.cc disguised video, & direct mp4 files)
+    const isTestwave = signedUrl.includes('testwave.cc') || signedUrl.includes('bunny-cdn');
     const isDirectMp4 = (signedUrl.includes('cors.pwjarvis.com') && signedUrl.includes('.mp4')) || 
-                        (signedUrl.includes('.mp4') && !signedUrl.includes('.m3u8') && !signedUrl.includes('.ts'));
+                        (signedUrl.includes('.mp4') && !signedUrl.includes('.m3u8') && !signedUrl.includes('.ts')) ||
+                        (isTestwave && signedUrl.includes('.pdf'));
 
     if (isDirectMp4) {
-        setStatus('Connecting to MP4 stream...', 'active');
+        setStatus('Connecting to video stream...', 'active');
         progWrap.style.display = 'block';
         updateProgress(0, 'Connecting...');
 
         // Step 1: Probe file to determine total size and Range support
         let totalBytes = 0;
         let supportsRange = false;
-        try {
-            const probeRes = await fetch(signedUrl, {
-                headers: { 'Range': 'bytes=0-0' }
-            });
-            if (probeRes.status === 206) {
-                supportsRange = true;
-                const cr = probeRes.headers.get('content-range');
-                if (cr) {
-                    const m = cr.match(/\/(\d+)/);
-                    if (m) totalBytes = parseInt(m[1]);
+        if (!isTestwave) {
+            try {
+                const probeRes = await fetch(signedUrl, {
+                    headers: { 'Range': 'bytes=0-0' }
+                });
+                if (probeRes.status === 206) {
+                    supportsRange = true;
+                    const cr = probeRes.headers.get('content-range');
+                    if (cr) {
+                        const m = cr.match(/\/(\d+)/);
+                        if (m) totalBytes = parseInt(m[1]);
+                    }
+                } else if (probeRes.ok) {
+                    totalBytes = parseInt(probeRes.headers.get('content-length')) || 0;
+                    if (probeRes.headers.get('accept-ranges') === 'bytes') supportsRange = true;
                 }
-            } else if (probeRes.ok) {
-                totalBytes = parseInt(probeRes.headers.get('content-length')) || 0;
-                if (probeRes.headers.get('accept-ranges') === 'bytes') supportsRange = true;
+            } catch(e) {
+                console.warn("Probe request failed:", e);
             }
-        } catch(e) {
-            console.warn("Probe request failed:", e);
         }
+
 
         if (!totalBytes) {
             try {
@@ -1135,7 +1152,7 @@ async function downloadVideo(vid, index) {
             
             while (totalBytes === 0 || downloadedBytes < totalBytes) {
                 const fetchHeaders = {};
-                if (downloadedBytes > 0) {
+                if (downloadedBytes > 0 && !isTestwave) {
                     fetchHeaders['Range'] = `bytes=${downloadedBytes}-`;
                 }
                 
@@ -1214,9 +1231,10 @@ async function downloadVideo(vid, index) {
         
         let targetReferer = 'https://pwthor.live/';
         let targetOrigin = 'https://pwthor.live';
-        if (signedUrl.includes('vidcloud')) {
+        if (signedUrl.includes('vidcloud') || signedUrl.includes('testwave') || signedUrl.includes('bunny-cdn')) {
             targetReferer = 'https://vidcloud.eu.org/';
             targetOrigin = 'https://vidcloud.eu.org';
+
         } else if (signedUrl.includes('samfygros')) {
             targetReferer = 'https://s3-cdn.samfygros.com/';
             targetOrigin = 'https://s3-cdn.samfygros.com';

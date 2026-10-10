@@ -6,7 +6,7 @@ const PW_URL_PATTERNS = [
   /master\.mpd(\?|$)/i,
   /\/hls\/\d+\/main\.m3u8/i,
   /\/dash\//i,
-  /(subodhpgcollege|code\.run|streamthorr|streamvideo\.co\.in)/i,
+  /(subodhpgcollege|code\.run|streamthorr|streamvideo\.co\.in|testwave\.cc|bunny-cdn)/i,
   /cors\.pwjarvis\.com/i,
   /\/video\/[a-f0-9]+\/\d+p\/video\.mp4/i,
 ];
@@ -30,13 +30,15 @@ function recordUrl(tabId, url) {
     url.includes('subodhpgcollege') ||
     url.includes('code.run') ||
     url.includes('streamthorr') ||
+    url.includes('testwave.cc') ||
+    url.includes('bunny-cdn') ||
     (url.includes('cors.pwjarvis.com') && url.includes('.mp4')) ||
     /\/hls\/\d+\/main\.m3u8/.test(url);
 
   if (!isMasterUrl) return;
 
   let finalUrl = url;
-  if (!url.includes('cors.pwjarvis.com') && !url.includes('.mp4')) {
+  if (!url.includes('cors.pwjarvis.com') && !url.includes('.mp4') && !url.includes('testwave.cc') && !url.includes('bunny-cdn')) {
     finalUrl = finalUrl.replace(/\.mpd(\?|$)/gi, '.m3u8$1');
     finalUrl = finalUrl.replace(/\/dash\/.*$/i, '/master.m3u8');
     finalUrl = finalUrl.replace(/\/hls\/\d+\/main\.m3u8/i, '/hls/720/main.m3u8');
@@ -177,12 +179,27 @@ async function setupStreamHeaderRules() {
         regexFilter: "^https?://[^/]*(cors\\.pwjarvis\\.com)[^/]*/.*",
         resourceTypes: ["xmlhttprequest", "media", "other"]
       }
+    },
+    {
+      id: 4,
+      priority: 1,
+      action: {
+        type: "modifyHeaders",
+        requestHeaders: [
+          { header: "Referer", operation: "set", value: "https://vidcloud.eu.org/" },
+          { header: "Origin", operation: "set", value: "https://vidcloud.eu.org" }
+        ]
+      },
+      condition: {
+        regexFilter: "^https?://[^/]*(testwave\\.cc|bunny-cdn)[^/]*/.*",
+        resourceTypes: ["xmlhttprequest", "media", "other"]
+      }
     }
   ];
 
   try {
     await chrome.declarativeNetRequest.updateDynamicRules({
-      removeRuleIds: [1, 2, 3],
+      removeRuleIds: [1, 2, 3, 4],
       addRules: rules
     });
     console.log("[PW Downloader] Stream header rules active.");

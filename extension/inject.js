@@ -13,15 +13,17 @@
     /cdn\.penpencil\.co\/.*master\.mpd/i,
     /cloudfront\.net\/.*master\.m3u8/i,
     /cloudfront\.net\/.*master\.mpd/i,
-    /testwave\.cc\/.*master\.m3u8/i,
-    /testwave\.cc\/.*master\.mpd/i,
+    /(testwave\.cc|bunny-cdn)/i,
+    /cors\.pwjarvis\.com/i,
     /(subodhpgcollege|code\.run|streamthorr|pwthor|streamvideo\.co\.in)/i,
     /\/dash\//i,
     /\/hls\/\d+\/main\.m3u8/i,
     /\/hls\/main\.m3u8/i,
+    /\/video\/[a-f0-9]+\/\d+p\/video\.mp4/i,
     // Universal Match: Any master playlist with an AWS Policy/Signature
     /master\.(m3u8|mpd).*(Policy=|Signature=)/i,
   ];
+
 
 function checkAndReport(text) {
   if (!text || typeof text !== 'string') return;

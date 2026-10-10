@@ -60,6 +60,17 @@ async function init() {
 async function fetchQualities() {
   if (!detectedUrl) return;
   showState('state-loading');
+
+  // Direct video streams (testwave.cc disguised stream, bunny-cdn, PW Jarvis direct MP4)
+  if (detectedUrl.includes('testwave.cc') || detectedUrl.includes('bunny-cdn') || (detectedUrl.includes('.mp4') && !detectedUrl.includes('.m3u8'))) {
+    qualities = [
+      { resolution: 'Original (Direct Stream)', url: detectedUrl }
+    ];
+    renderQualities();
+    showState('state-quality');
+    return;
+  }
+
   try {
     const resp = await fetch(`${HF_BACKEND}/api/parse?url=${encodeURIComponent(detectedUrl)}`);
     if (!resp.ok) throw new Error(`Backend returned ${resp.status}`);
@@ -69,9 +80,15 @@ async function fetchQualities() {
     renderQualities();
     showState('state-quality');
   } catch (err) {
-    showError(`Failed to fetch qualities:\n${err.message}\n\nMake sure the HF backend is running.`);
+    // Graceful fallback: allow direct downloading of the intercepted stream
+    qualities = [
+      { resolution: 'Original Stream (Direct)', url: detectedUrl }
+    ];
+    renderQualities();
+    showState('state-quality');
   }
 }
+
 
 // --- Render quality buttons ---
 function renderQualities() {
@@ -119,7 +136,39 @@ async function startDownload() {
   document.getElementById('btn-save').style.display = 'none';
   showState('state-downloading');
 
+  // Direct stream engine (runs inside browser with DNR referer rules)
+  if (selectedQualityUrl.includes('testwave.cc') || selectedQualityUrl.includes('bunny-cdn')) {
+    addLog('Downloading direct video stream in browser...', 'ok');
+    try {
+      const res = await fetch(selectedQualityUrl);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const contentLength = parseInt(res.headers.get('content-length')) || 0;
+      if (contentLength > 0) {
+        document.getElementById('stat-mb').textContent = (contentLength / (1024 * 1024)).toFixed(2);
+      }
+      const blob = await res.blob();
+      const currentTitle = document.getElementById('lecture-title-input').value.trim() || 'PW_Lecture';
+      downloadFileUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = downloadFileUrl;
+      a.download = `${currentTitle}.mp4`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      document.getElementById('dl-bar').style.width = '100%';
+      document.getElementById('dl-percent').textContent = '100%';
+      document.getElementById('dl-status').textContent = '✅ Download Complete!';
+      addLog('Stream downloaded and saved successfully as MP4!', 'ok');
+      document.getElementById('btn-save').style.display = 'block';
+    } catch(err) {
+      addLog(`Error: ${err.message}`, 'err');
+      showError(`Download failed:\n${err.message}`);
+    }
+    return;
+  }
+
   addLog('Starting download request to backend...');
+
 
   try {
     // Step 1: Kick off download job on the backend
@@ -268,10 +317,11 @@ if (document.getElementById('btn-manual-fetch')) {
     const manualUrl = document.getElementById('manual-url-input').value.trim();
     if (manualUrl) {
       if (manualUrl.includes('play.php')) {
-        chrome.tabs.create({ url: manualUrl, active: true });
+        chrome.tabs.create({ url: `dashboard.html?autolink=${encodeURIComponent(manualUrl)}` });
         window.close();
         return;
       }
+
       detectedUrl = manualUrl;
       detectedTitle = 'Manual_Download';
       document.getElementById('url-display').textContent = manualUrl;

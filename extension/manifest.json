@@ -9,7 +9,8 @@
     "storage",
     "tabs",
     "activeTab",
-    "scripting"
+    "scripting",
+    "downloads"
   ],
   "host_permissions": [
     "*://*.pw.live/*",
@@ -46,6 +47,22 @@
       ],
       "js": ["content.js"],
       "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "*://*.pw.live/*",
+        "*://*.penpencil.co/*",
+        "*://*.classplusapp.com/*",
+        "*://*.vidcloud.eu.org/*",
+        "*://*.rarestudy.in/*",
+        "*://*.samfygros.com/*",
+        "*://*.pwthor.live/*",
+        "*://*.pwjarvis.com/*",
+        "*://*.streamvideo.co.in/*"
+      ],
+      "js": ["inject.js"],
+      "world": "MAIN",
+      "run_at": "document_start"
     }
   ],
   "icons": {
@@ -55,7 +72,7 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["batches.json"],
+      "resources": ["batches.json", "inject.js"],
       "matches": ["<all_urls>"]
     }
   ]

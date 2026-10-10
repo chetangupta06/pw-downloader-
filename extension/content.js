@@ -9,7 +9,7 @@
     /master\.mpd(\?|$)/i,
     /\/hls\/\d+\/main\.m3u8/i,
     /\/dash\//i,
-    /(subodhpgcollege|code\.run|streamthorr|streamvideo\.co\.in)/i,
+    /(subodhpgcollege|code\.run|streamthorr|streamvideo\.co\.in|testwave\.cc|bunny-cdn)/i,
     /cors\.pwjarvis\.com/i,
     /\/video\/[a-f0-9]+\/\d+p\/video\.mp4/i,
   ];
@@ -25,6 +25,33 @@
       });
     }
   }
+
+  // --- Hook window messages from inject.js (MAIN world) ---
+  window.addEventListener('message', (event) => {
+    if (event.source !== window) return;
+    if (event.data && event.data.type === 'PW_URL_DETECTED' && event.data.url) {
+      checkAndReport(event.data.url);
+    }
+  });
+
+  // --- Hook URL.createObjectURL to catch decrypted blob playlists ---
+  const origCreateObjectURL = URL.createObjectURL;
+  URL.createObjectURL = function(obj) {
+    if (obj instanceof Blob) {
+      if (obj.type.includes('mpegurl') || obj.type.includes('dash') || obj.type.includes('video') || obj.type.includes('octet-stream')) {
+        obj.text().then(text => {
+          if (text && text.startsWith('#EXTM3U')) {
+            const matches = text.match(/https?:\/\/[^\r\n]+/g);
+            if (matches && matches.length > 0) {
+              checkAndReport(matches[0]);
+            }
+          }
+        }).catch(() => {});
+      }
+    }
+    return origCreateObjectURL.apply(this, arguments);
+  };
+
 
   // --- Patch fetch ---
   const originalFetch = window.fetch;
