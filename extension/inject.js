@@ -25,6 +25,23 @@
   ];
 
 
+function isValidM3U8(text) {
+  if (!text || typeof text !== 'string') return false;
+  const trimmed = text.trim().replace(/^\uFEFF/, '');
+  if (!trimmed.startsWith('#EXTM3U')) return false;
+  // Strictly reject JS files / web workers that mention #EXTM3U as a string literal
+  if (trimmed.includes('function(') || 
+      trimmed.includes('var ') || 
+      trimmed.includes('const ') || 
+      trimmed.includes('let ') || 
+      trimmed.includes('module.exports') || 
+      trimmed.includes('define.amd') || 
+      trimmed.includes('exports=')) {
+    return false;
+  }
+  return trimmed.includes('#EXTINF:') || trimmed.includes('#EXT-X-STREAM-INF') || trimmed.includes('#EXT-X-TARGETDURATION');
+}
+
 function checkAndReport(text, sourceUrl) {
   if (!text || typeof text !== 'string') return;
   if (text.startsWith('blob:')) return; // Ignore blob wrappers
@@ -34,7 +51,7 @@ function checkAndReport(text, sourceUrl) {
   if ((text.includes('testwave.cc') || text.includes('bunny-cdn')) && text.includes('.pdf')) return;
   
   // If the text itself is an in-memory M3U8 playlist
-  if (text.includes('#EXTM3U')) {
+  if (isValidM3U8(text)) {
     window.postMessage({ type: 'PW_PLAYLIST_DETECTED', playlist: text, url: sourceUrl || null, title: document.title }, '*');
     return;
   }
@@ -117,8 +134,9 @@ const _origCreateObjectURL = URL.createObjectURL;
 URL.createObjectURL = function(obj) {
   const resultUrl = _origCreateObjectURL.apply(this, arguments);
   if (obj instanceof Blob) {
+    if (obj.type && (obj.type.includes('javascript') || obj.type.includes('json') || obj.type.includes('css'))) return resultUrl;
     obj.text().then(text => {
-      if (typeof text === 'string' && text.includes('#EXTM3U')) {
+      if (isValidM3U8(text)) {
         console.log('[PW Downloader] Intercepted full M3U8 blob playlist!');
         window.postMessage({ type: 'PW_PLAYLIST_DETECTED', playlist: text, blobUrl: resultUrl, title: document.title }, '*');
       }
@@ -134,7 +152,7 @@ function hookShaka(shakaObj) {
   shakaObj.Player.prototype.load = function(assetUri, ...rest) {
     if (typeof assetUri === 'string' && assetUri.startsWith('blob:')) {
       fetch(assetUri).then(r => r.text()).then(text => {
-        if (text && text.includes('#EXTM3U')) {
+        if (isValidM3U8(text)) {
           console.log('[PW Downloader] Intercepted M3U8 from Shaka Player load!');
           window.postMessage({ type: 'PW_PLAYLIST_DETECTED', playlist: text, blobUrl: assetUri, title: document.title }, '*');
         }

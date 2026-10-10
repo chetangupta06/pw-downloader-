@@ -144,7 +144,27 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ success: true });
   }
 
+function isValidM3U8(text) {
+  if (!text || typeof text !== 'string') return false;
+  const trimmed = text.trim().replace(/^\uFEFF/, '');
+  if (!trimmed.startsWith('#EXTM3U')) return false;
+  if (trimmed.includes('function(') || 
+      trimmed.includes('var ') || 
+      trimmed.includes('const ') || 
+      trimmed.includes('let ') || 
+      trimmed.includes('module.exports') || 
+      trimmed.includes('define.amd') || 
+      trimmed.includes('exports=')) {
+    return false;
+  }
+  return trimmed.includes('#EXTINF:') || trimmed.includes('#EXT-X-STREAM-INF') || trimmed.includes('#EXT-X-TARGETDURATION');
+}
+
   if (message.type === 'SET_PLAYLIST') {
+    if (!isValidM3U8(message.playlist)) {
+      sendResponse({ success: false });
+      return true;
+    }
     const tabId = sender.tab?.id || -1;
     const entry = { 
       playlist: message.playlist, 

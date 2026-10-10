@@ -864,6 +864,47 @@ async function updateHostDnr(host, ruleId) {
     }
 }
 
+const safeUrl = (url, base) => {
+    if (!url || typeof url !== 'string') return null;
+    try {
+        const trimmed = url.trim();
+        if (base && typeof base === 'string') {
+            const trimmedBase = base.trim();
+            if (trimmedBase.startsWith('http://') || trimmedBase.startsWith('https://')) {
+                return new URL(trimmed, trimmedBase);
+            }
+        }
+        if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+            return new URL(trimmed);
+        }
+        return null;
+    } catch(e) {
+        return null;
+    }
+};
+
+const safeHostname = (url) => {
+    const u = safeUrl(url);
+    return u ? u.hostname : '';
+};
+
+function isValidM3U8(text) {
+    if (!text || typeof text !== 'string') return false;
+    const trimmed = text.trim().replace(/^\uFEFF/, '');
+    if (!trimmed.startsWith('#EXTM3U')) return false;
+    // Strictly reject JS files / web workers that mention #EXTM3U as a string literal
+    if (trimmed.includes('function(') || 
+        trimmed.includes('var ') || 
+        trimmed.includes('const ') || 
+        trimmed.includes('let ') || 
+        trimmed.includes('module.exports') || 
+        trimmed.includes('define.amd') || 
+        trimmed.includes('exports=')) {
+        return false;
+    }
+    return trimmed.includes('#EXTINF:') || trimmed.includes('#EXT-X-STREAM-INF') || trimmed.includes('#EXT-X-TARGETDURATION');
+}
+
 async function downloadVideo(vid, index) {
   const contentType = document.getElementById('select-type').value;
   const isVideo = contentType === 'videos' || contentType === 'DppVideos';
@@ -1096,7 +1137,7 @@ async function downloadVideo(vid, index) {
                 tabId: tab ? tab.id : -1,
                 since: startTime 
             }, r));
-            if (plResp && plResp.playlist) {
+            if (plResp && plResp.playlist && isValidM3U8(plResp.playlist)) {
                 signedUrl = plResp.playlist;
                 capturedUrl = plResp.url || null;
                 break;
@@ -1109,7 +1150,7 @@ async function downloadVideo(vid, index) {
                 tabId: tab ? tab.id : -1, 
                 since: startTime 
             }, r));
-            if (resp && resp.url) {
+            if (resp && resp.url && resp.url.startsWith('http')) {
                 signedUrl = resp.url;
                 capturedUrl = resp.url;
                 break;
@@ -1128,17 +1169,14 @@ async function downloadVideo(vid, index) {
     }
 
     let displayStreamInfo = signedUrl.length > 120 ? signedUrl.substring(0, 120) + '...' : signedUrl;
-    if (signedUrl.includes('#EXTM3U')) {
+    if (isValidM3U8(signedUrl)) {
         displayStreamInfo = 'Full M3U8 Playlist (in-memory)';
     }
     logTerminal(`[${title}] Intercepted stream: ${displayStreamInfo}`, 'ok');
 
 
     // DIRECT MP4 STREAMING ENGINE (PW Jarvis, testwave.cc disguised video, & direct mp4 files)
-    const isManifest = signedUrl.includes('#EXTM3U') || 
-                       signedUrl.includes('#EXT-X-STREAM-INF') || 
-                       signedUrl.includes('#EXT-X-TARGETDURATION') || 
-                       signedUrl.includes('#EXTINF:');
+    const isManifest = isValidM3U8(signedUrl);
 
     const isTestwave = signedUrl.includes('testwave.cc') || signedUrl.includes('bunny-cdn');
     const isDirectMp4 = !isManifest && (
@@ -1309,31 +1347,6 @@ async function downloadVideo(vid, index) {
         return;
     }
 
-    // Safe URL parsing helpers
-    const safeUrl = (url, base) => {
-        if (!url || typeof url !== 'string') return null;
-        try {
-            const trimmed = url.trim();
-            if (base && typeof base === 'string') {
-                const trimmedBase = base.trim();
-                if (trimmedBase.startsWith('http://') || trimmedBase.startsWith('https://')) {
-                    return new URL(trimmed, trimmedBase);
-                }
-            }
-            if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-                return new URL(trimmed);
-            }
-            return null;
-        } catch(e) {
-            return null;
-        }
-    };
-
-    const safeHostname = (url) => {
-        const u = safeUrl(url);
-        return u ? u.hostname : '';
-    };
-
     // Determine a reliable fallback base URL if relative paths are present
     let fallbackBaseUrl = '';
     if (capturedUrl && capturedUrl.startsWith('http')) {
@@ -1351,11 +1364,7 @@ async function downloadVideo(vid, index) {
     }
 
     const trimmedInput = (signedUrl || '').trim().replace(/^\uFEFF/, '');
-    const isStreamManifest = isManifest || 
-                             trimmedInput.includes('#EXTM3U') || 
-                             trimmedInput.includes('#EXT-X-STREAM-INF') || 
-                             trimmedInput.includes('#EXT-X-TARGETDURATION') || 
-                             trimmedInput.includes('#EXTINF:');
+    const isStreamManifest = isValidM3U8(signedUrl);
 
     let masterManifest = '';
     let mediaManifest = '';

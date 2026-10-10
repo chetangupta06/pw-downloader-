@@ -47,21 +47,38 @@
     }
   });
 
+function isValidM3U8(text) {
+  if (!text || typeof text !== 'string') return false;
+  const trimmed = text.trim().replace(/^\uFEFF/, '');
+  if (!trimmed.startsWith('#EXTM3U')) return false;
+  if (trimmed.includes('function(') || 
+      trimmed.includes('var ') || 
+      trimmed.includes('const ') || 
+      trimmed.includes('let ') || 
+      trimmed.includes('module.exports') || 
+      trimmed.includes('define.amd') || 
+      trimmed.includes('exports=')) {
+    return false;
+  }
+  return trimmed.includes('#EXTINF:') || trimmed.includes('#EXT-X-STREAM-INF') || trimmed.includes('#EXT-X-TARGETDURATION');
+}
+
   // --- Hook URL.createObjectURL to catch decrypted blob playlists ---
   const origCreateObjectURL = URL.createObjectURL;
   URL.createObjectURL = function(obj) {
     if (obj instanceof Blob) {
-      if (obj.type.includes('mpegurl') || obj.type.includes('dash') || obj.type.includes('video') || obj.type.includes('octet-stream')) {
-        obj.text().then(text => {
-          if (text && text.includes('#EXTM3U')) {
-            chrome.runtime.sendMessage({
-              type: 'SET_PLAYLIST',
-              playlist: text,
-              title: document.title
-            });
-          }
-        }).catch(() => {});
+      if (obj.type && (obj.type.includes('javascript') || obj.type.includes('json') || obj.type.includes('css'))) {
+        return origCreateObjectURL.apply(this, arguments);
       }
+      obj.text().then(text => {
+        if (isValidM3U8(text)) {
+          chrome.runtime.sendMessage({
+            type: 'SET_PLAYLIST',
+            playlist: text,
+            title: document.title
+          });
+        }
+      }).catch(() => {});
     }
     return origCreateObjectURL.apply(this, arguments);
   };
@@ -72,15 +89,19 @@
   window.fetch = async function (...args) {
     const url = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url ? args[0].url : '');
     checkAndReport(url);
+
+    if (/\.(js|json|css|wasm|html)(\?|$)/i.test(url)) {
+      return originalFetch.apply(this, args);
+    }
     
     try {
         const response = await originalFetch.apply(this, args);
         const clonedResponse = response.clone();
         
         clonedResponse.text().then(text => {
-            if (typeof text === 'string' && text.includes('#EXTM3U')) {
+            if (isValidM3U8(text)) {
                 if (!url.includes('enc.key')) {
-                    chrome.runtime.sendMessage({ type: 'SET_PLAYLIST', playlist: text, title: document.title });
+                    chrome.runtime.sendMessage({ type: 'SET_PLAYLIST', playlist: text, url: response.url || url, title: document.title });
                     chrome.runtime.sendMessage({ type: 'SET_URL', url: response.url || url });
                 }
             }
@@ -97,23 +118,20 @@
   XMLHttpRequest.prototype.open = function (method, url, ...rest) {
     checkAndReport(url);
     
-    // Attach event listener to check the response content for obfuscated M3U8 playlists
-    this.addEventListener('load', function() {
-        try {
-            const responseText = this.responseText;
-            // If the response is an HLS playlist (even if the URL is completely obfuscated)
-            if (typeof responseText === 'string' && responseText.includes('#EXTM3U')) {
-                if (!url.includes('enc.key')) {
-                    chrome.runtime.sendMessage({ type: 'SET_PLAYLIST', playlist: responseText, title: document.title });
-                    chrome.runtime.sendMessage({ type: 'SET_URL', url: this.responseURL || url });
-                }
-            }
-        } catch(e) {
-            // Ignore response reading errors (e.g., binary data or CORS)
-        }
-    });
-
-    return originalXhrOpen.call(this, method, url, ...rest);
+    if (!/\.(js|json|css|wasm|html)(\?|$)/i.test(url)) {
+      this.addEventListener('load', function() {
+          try {
+              const responseText = this.responseText;
+              if (isValidM3U8(responseText)) {
+                  if (!url.includes('enc.key')) {
+                      chrome.runtime.sendMessage({ type: 'SET_PLAYLIST', playlist: responseText, url: this.responseURL || url, title: document.title });
+                      chrome.runtime.sendMessage({ type: 'SET_URL', url: this.responseURL || url });
+                  }
+              }
+          } catch(e) {}
+      });
+    }
+    return originalXhrOpen.apply(this, [method, url, ...rest]);
   };
 
   // --- Scan DOM for <video> and <source> tags ---

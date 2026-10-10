@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "PW Lecture Downloader",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Automatically detect PW lecture videos on any platform and download them in your desired quality.",
   "permissions": [
     "declarativeNetRequest",
