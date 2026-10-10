@@ -101,12 +101,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'GET_URL') {
     const tabId = message.tabId;
     const since = message.since || 0;
-    let data = detectedUrls[tabId];
+    let data = (tabId && tabId > 0) ? detectedUrls[tabId] : null;
     if (!data && latestDetectedUrl && latestDetectedUrl.timestamp >= since) {
       data = latestDetectedUrl;
     }
+    if (!data) {
+      for (const id in detectedUrls) {
+        if (detectedUrls[id] && detectedUrls[id].timestamp >= since) {
+          data = detectedUrls[id];
+          break;
+        }
+      }
+    }
     sendResponse({ url: data ? data.url : null, title: data ? data.title : null });
   }
+
 
   if (message.type === 'CLEAR_URL') {
     const tabId = message.tabId;

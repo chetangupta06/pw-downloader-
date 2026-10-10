@@ -989,38 +989,61 @@ async function downloadVideo(vid, index) {
 
     
     // Create an off-screen popup window so the player's visibility checks pass without stealing focus
-    let tab;
+    let tab = null;
     let winId = null;
     try {
         const win = await chrome.windows.create({ 
             url: watchUrl, 
             type: 'popup', 
-            state: 'minimized'
+            state: 'minimized',
+            populate: true
         });
-        tab = win.tabs[0];
         winId = win.id;
+        tab = (win.tabs && win.tabs.length > 0) ? win.tabs[0] : null;
+        if (!tab) {
+            const tabs = await chrome.tabs.query({ windowId: win.id });
+            tab = tabs[0];
+        }
     } catch (e) {
         // Fallback for Android browsers like Kiwi or Lemur which do not support multiple windows
         tab = await chrome.tabs.create({ url: watchUrl, active: false });
     }
     
-    // Clear any previously stored URL for this specific tab
-    await new Promise(r => chrome.runtime.sendMessage({ type: 'CLEAR_URL', tabId: tab.id }, r));
+    // Clear any previously stored URL for this specific tab if exists
+    if (tab && tab.id) {
+        await new Promise(r => chrome.runtime.sendMessage({ type: 'CLEAR_URL', tabId: tab.id }, r));
+    }
 
     // Content.js automatically handles auto-clicking and muted play on the background tab
 
     let signedUrl = null;
     let attempts = 0;
     
-    // Poll background script for URL (up to 25 seconds)
-    while (!signedUrl && attempts < 250) {
+    // Poll background script for URL or captured playlist (up to 35 seconds)
+    while (!signedUrl && attempts < 350) {
         await new Promise(r => setTimeout(r, 100)); // 100ms
         attempts++;
         
         try {
-            const resp = await new Promise(r => chrome.runtime.sendMessage({ type: 'GET_URL', tabId: tab.id, since: startTime }, r));
+            // 1. Check for full captured playlist first
+            const plResp = await new Promise(r => chrome.runtime.sendMessage({ 
+                type: 'GET_PLAYLIST', 
+                tabId: tab ? tab.id : -1 
+            }, r));
+            if (plResp && plResp.playlist) {
+                signedUrl = plResp.playlist;
+                break;
+            }
+
+            // 2. Check for intercepted video URL
+            const resp = await new Promise(r => chrome.runtime.sendMessage({ 
+                type: 'GET_URL', 
+                tabId: tab ? tab.id : -1, 
+                since: startTime 
+            }, r));
             if (resp && resp.url) {
                 signedUrl = resp.url;
+                break;
             }
         } catch(e) {}
     }
@@ -1028,14 +1051,15 @@ async function downloadVideo(vid, index) {
     // Clean up off-screen window or tab
     try {
         if (winId) chrome.windows.remove(winId);
-        else chrome.tabs.remove(tab.id);
+        else if (tab && tab.id) chrome.tabs.remove(tab.id);
     } catch(e) {}
     
     if (!signedUrl || typeof signedUrl !== 'string' || signedUrl.startsWith("ERR:")) {
         throw new Error(signedUrl || 'Extraction timed out or returned null.');
     }
 
-    logTerminal(`[${sanitizedTitle}] Intercepted stream: ${signedUrl}`, 'ok');
+    logTerminal(`[${title}] Intercepted stream: ${signedUrl}`, 'ok');
+
 
     // DIRECT MP4 STREAMING ENGINE (PW Jarvis, testwave.cc disguised video, & direct mp4 files)
     const isTestwave = signedUrl.includes('testwave.cc') || signedUrl.includes('bunny-cdn');
