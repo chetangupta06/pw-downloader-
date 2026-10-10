@@ -13,7 +13,7 @@
     /cdn\.penpencil\.co\/.*master\.mpd/i,
     /cloudfront\.net\/.*master\.m3u8/i,
     /cloudfront\.net\/.*master\.mpd/i,
-    /(testwave\.cc|bunny-cdn)/i,
+    /(testwave\.cc|bunny-cdn).*(\.m3u8|\.mpd|\/hls\/|\/dash\/)/i,
     /cors\.pwjarvis\.com/i,
     /(subodhpgcollege|code\.run|streamthorr|pwthor|streamvideo\.co\.in)/i,
     /\/dash\//i,
@@ -30,11 +30,19 @@ function checkAndReport(text) {
   if (text.startsWith('blob:')) return; // Ignore blob wrappers
   if (/\.(ts|m4s|aac|key|vtt|srt|jpg|jpeg|png|webp|svg|ico|css|woff2?|js|json)(\?|$)/i.test(text)) return;
   if (text.includes('/enc.key') || text.includes('/get-hls-key')) return;
+  // Ignore segment chunks disguised as PDF on testwave / bunny-cdn
+  if ((text.includes('testwave.cc') || text.includes('bunny-cdn')) && text.includes('.pdf')) return;
   
+  // If the text itself is an in-memory M3U8 playlist
+  if (text.includes('#EXTM3U')) {
+    window.postMessage({ type: 'PW_PLAYLIST_DETECTED', playlist: text, title: document.title }, '*');
+    return;
+  }
+
   let foundUrl = text;
   // If the text is JSON, try to extract the URL from inside it
   if (text.includes('{') && text.includes('}')) {
-      const match = text.match(/(https?:\/\/[^\"]*?master\.(m3u8|mpd)[^\"]*)/i);
+      const match = text.match(/(https?:\/\/[^\"]*?\.(m3u8|mpd)[^\"]*)/i) || text.match(/(https?:\/\/[^\"]*?\/stream\/[^\"]*)/i);
       if (match) {
           foundUrl = match[1];
       }

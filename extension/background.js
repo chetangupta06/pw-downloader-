@@ -6,7 +6,8 @@ const PW_URL_PATTERNS = [
   /master\.mpd(\?|$)/i,
   /\/hls\/\d+\/main\.m3u8/i,
   /\/dash\//i,
-  /(subodhpgcollege|code\.run|streamthorr|streamvideo\.co\.in|testwave\.cc|bunny-cdn)/i,
+  /(subodhpgcollege|code\.run|streamthorr|streamvideo\.co\.in)/i,
+  /(testwave\.cc|bunny-cdn).*(\.m3u8|\.mpd|\/hls\/|\/dash\/)/i,
   /cors\.pwjarvis\.com/i,
   /\/video\/[a-f0-9]+\/\d+p\/video\.mp4/i,
 ];
@@ -22,6 +23,8 @@ function recordUrl(tabId, url) {
   // Ignore non-video assets, segments, keys, subtitles
   if (/\.(ts|m4s|aac|key|vtt|srt|jpg|jpeg|png|webp|svg|ico|css|woff2?|js|json)(\?|$)/i.test(url)) return;
   if (url.includes('/enc.key') || url.includes('/get-hls-key')) return;
+  // Ignore segment chunks disguised as PDF on testwave / bunny-cdn
+  if ((url.includes('testwave.cc') || url.includes('bunny-cdn')) && url.includes('.pdf')) return;
 
   const isMasterUrl =
     url.includes('master.m3u8') ||
@@ -33,8 +36,7 @@ function recordUrl(tabId, url) {
     url.includes('subodhpgcollege') ||
     url.includes('code.run') ||
     url.includes('streamthorr') ||
-    url.includes('testwave.cc') ||
-    url.includes('bunny-cdn') ||
+    ((url.includes('testwave.cc') || url.includes('bunny-cdn')) && (url.includes('.m3u8') || url.includes('.mpd') || url.includes('/hls/') || url.includes('/dash/'))) ||
     (url.includes('cors.pwjarvis.com') && url.includes('.mp4')) ||
     /\/hls\/\d+\/main\.m3u8/.test(url);
 

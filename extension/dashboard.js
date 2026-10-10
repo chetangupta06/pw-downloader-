@@ -454,10 +454,18 @@ async function loadChapters(batchId, subjectId) {
         console.warn("Direct penpencil topics fetch failed:", e);
       }
 
-      // 2. Vidcloud V1 API fallback
+      // 2. Vidcloud V1 API fallback with token & client-id
       if (topics.length === 0) {
         try {
-          const res = await fetch(`https://vidcloud.eu.org/api/v1/batches/${resolvedBatchId}/subject/${subjectId}/topics?page=${page}`);
+          let token = await getVidcloudToken();
+          const headers = { 'client-id': '5eb393ee95fab7468a79d189' };
+          if (token) headers['Authorization'] = `Bearer ${token}`;
+          let res = await fetch(`https://vidcloud.eu.org/api/v1/batches/${resolvedBatchId}/subject/${subjectId}/topics?page=${page}`, { headers });
+          if (res.status === 401) {
+            token = await getVidcloudToken(true);
+            if (token) headers['Authorization'] = `Bearer ${token}`;
+            res = await fetch(`https://vidcloud.eu.org/api/v1/batches/${resolvedBatchId}/subject/${subjectId}/topics?page=${page}`, { headers });
+          }
           if (res.ok) {
             const data = await res.json();
             topics = data?.data || [];
@@ -763,6 +771,7 @@ document.getElementById('btn-fetch-videos').addEventListener('click', async () =
       }, 150);
       logTerminal(`🎯 Auto-targeted lecture: "${window.targetLectureFilter.videoName || 'Lecture'}"! Ready to download.`, 'ok');
     }
+    window.targetLectureFilter = null;
   }
 });
 
@@ -800,6 +809,60 @@ document.getElementById('btn-start-bulk').addEventListener('click', async () => 
   logTerminal('🎉 All downloads completed!', 'ok');
   document.getElementById('btn-start-bulk').disabled = false;
 });
+
+function getHeadersForHost(hostname) {
+    if (!hostname) return { referer: '', origin: '' };
+    const h = hostname.toLowerCase();
+    if (h.includes('streamvideo') || h.includes('subodhpgcollege') || h.includes('code.run') || h.includes('streamthorr')) {
+        return { referer: 'https://pwthor.live/', origin: 'https://pwthor.live' };
+    }
+    if (h.includes('vidcloud') || h.includes('testwave') || h.includes('bunny-cdn')) {
+        return { referer: 'https://vidcloud.eu.org/', origin: 'https://vidcloud.eu.org' };
+    }
+    if (h.includes('samfygros')) {
+        return { referer: 'https://s3-cdn.samfygros.com/', origin: 'https://s3-cdn.samfygros.com' };
+    }
+    if (h.includes('pwjarvis')) {
+        return { referer: 'https://www.pwjarvis.com/', origin: 'https://www.pwjarvis.com' };
+    }
+    if (h.includes('rarestudy')) {
+        return { referer: 'https://rarestudy.in/', origin: 'https://rarestudy.in' };
+    }
+    return { referer: '', origin: '' };
+}
+
+async function updateHostDnr(host, ruleId) {
+    if (!host || !chrome.declarativeNetRequest || !chrome.declarativeNetRequest.updateDynamicRules) return;
+    try {
+        const headers = getHeadersForHost(host);
+        if (headers.referer) {
+            await chrome.declarativeNetRequest.updateDynamicRules({
+                removeRuleIds: [ruleId],
+                addRules: [{
+                    id: ruleId,
+                    priority: 100,
+                    action: {
+                        type: "modifyHeaders",
+                        requestHeaders: [
+                            { header: "Referer", operation: "set", value: headers.referer },
+                            { header: "Origin", operation: "set", value: headers.origin }
+                        ]
+                    },
+                    condition: {
+                        urlFilter: `||${host}`,
+                        resourceTypes: ["xmlhttprequest", "media", "other"]
+                    }
+                }]
+            });
+        } else {
+            await chrome.declarativeNetRequest.updateDynamicRules({
+                removeRuleIds: [ruleId]
+            });
+        }
+    } catch (e) {
+        console.warn("Failed to update DNR rule for host", host, e);
+    }
+}
 
 async function downloadVideo(vid, index) {
   const contentType = document.getElementById('select-type').value;
@@ -1235,111 +1298,111 @@ async function downloadVideo(vid, index) {
     // Bypass proxy servers (like testwave.cc) and fetch directly from CloudFront to avoid Origin blocks
     signedUrl = signedUrl.replace(/^https?:\/\/[^\/]+\/play\/(d1d34p8vz63oiq\.cloudfront\.net.*)/i, 'https://$1');
     
-    // Revive dead Northflank/code.run / subodhpgcollege domains back to live streamvideo server
-    signedUrl = signedUrl.replace(/https?:\/\/[^\/]*(code\.run|subodhpgcollege\.site)/gi, 'https://streamvideo.co.in');
+    let masterManifest = '';
+    let mediaManifest = '';
+    let bestQualityUrl = '';
 
-    // If a segment or key was intercepted on an HLS path, restore it back to main.m3u8
-    if (signedUrl.includes('/hls/') && !signedUrl.includes('main.m3u8')) {
-        signedUrl = signedUrl.replace(/\/hls\/.*/i, '/hls/720/main.m3u8');
-    } else if (signedUrl.includes('streamvideo.co.in/stream/') && !signedUrl.includes('main.m3u8')) {
-        signedUrl = signedUrl.replace(/(https:\/\/[^/]+\/stream\/[^/]+).*/i, '$1/hls/720/main.m3u8');
-    }
-
-    // Intelligently convert direct DASH links back into the Master Playlist
-    signedUrl = signedUrl.replace(/\/dash\/.*$/i, '/master.m3u8');
-
-    // Ensure we use HLS for native processing
-    signedUrl = signedUrl.replace('.mpd', '.m3u8');
-
-    // Configure Declarative Net Request headers for the streaming domain BEFORE fetching playlists (bypasses Cloudflare 403)
-    try {
-        const streamUrlObj = new URL(signedUrl);
-        const streamHost = streamUrlObj.hostname;
-        
-        let targetReferer = 'https://pwthor.live/';
-        let targetOrigin = 'https://pwthor.live';
-        if (signedUrl.includes('vidcloud') || signedUrl.includes('testwave') || signedUrl.includes('bunny-cdn')) {
-            targetReferer = 'https://vidcloud.eu.org/';
-            targetOrigin = 'https://vidcloud.eu.org';
-
-        } else if (signedUrl.includes('samfygros')) {
-            targetReferer = 'https://s3-cdn.samfygros.com/';
-            targetOrigin = 'https://s3-cdn.samfygros.com';
-        } else if (signedUrl.includes('rarestudy')) {
-            targetReferer = 'https://rarestudy.in/';
-            targetOrigin = 'https://rarestudy.in';
-        } else if (signedUrl.includes('streamvideo') || signedUrl.includes('subodhpgcollege') || signedUrl.includes('code.run') || signedUrl.includes('streamthorr')) {
-            targetReferer = 'https://pwthor.live/';
-            targetOrigin = 'https://pwthor.live';
-        }
-        
-        if (chrome.declarativeNetRequest && chrome.declarativeNetRequest.updateDynamicRules) {
-            await chrome.declarativeNetRequest.updateDynamicRules({
-                removeRuleIds: [9999],
-                addRules: [{
-                    id: 9999,
-                    priority: 100,
-                    action: {
-                        type: "modifyHeaders",
-                        requestHeaders: [
-                            { header: "Referer", operation: "set", value: targetReferer },
-                            { header: "Origin", operation: "set", value: targetOrigin }
-                        ]
-                    },
-                    condition: {
-                        urlFilter: `||${streamHost}`,
-                        resourceTypes: ["xmlhttprequest", "media", "other"]
-                    }
-                }]
-            });
-        }
-    } catch (e) {
-        console.warn("Failed to set DNR header rule:", e);
-    }
-    
-    setStatus('Parsing master playlist...', 'active');
-    
-    // Step 4.2: Fetch Master M3U8
-    const mRes = await fetch(signedUrl);
-    const masterManifest = await mRes.text();
-    if (!mRes.ok) {
-        throw new Error(`Master playlist HTTP ${mRes.status} (${mRes.statusText}): ${masterManifest.substring(0, 150)}`);
-    }
-    
-    let bestQualityUrl = signedUrl;
-    
-    if (masterManifest.includes('#EXT-X-STREAM-INF')) {
-        // Simple manual parsing to find the highest bandwidth
-        const lines = masterManifest.split('\n');
-        let maxBandwidth = 0;
-        let bestUri = '';
-        for (let j = 0; j < lines.length; j++) {
-            if (lines[j].startsWith('#EXT-X-STREAM-INF')) {
-                const bwMatch = lines[j].match(/BANDWIDTH=(\d+)/);
-                if (bwMatch) {
-                    const bw = parseInt(bwMatch[1]);
-                    if (bw > maxBandwidth) {
-                        maxBandwidth = bw;
-                        bestUri = lines[j+1].trim();
+    if (signedUrl.startsWith('#EXTM3U')) {
+        logTerminal(`[${title}] Parsing captured full stream manifest...`, 'ok');
+        if (signedUrl.includes('#EXT-X-STREAM-INF')) {
+            masterManifest = signedUrl;
+            const lines = masterManifest.split('\n');
+            let maxBandwidth = 0;
+            let bestUri = '';
+            for (let j = 0; j < lines.length; j++) {
+                if (lines[j].startsWith('#EXT-X-STREAM-INF')) {
+                    const bwMatch = lines[j].match(/BANDWIDTH=(\d+)/);
+                    if (bwMatch) {
+                        const bw = parseInt(bwMatch[1]);
+                        if (bw > maxBandwidth) {
+                            maxBandwidth = bw;
+                            bestUri = lines[j+1].trim();
+                        }
                     }
                 }
             }
+            if (bestUri.startsWith('http')) {
+                bestQualityUrl = bestUri;
+                const streamHost = new URL(bestQualityUrl).hostname;
+                await updateHostDnr(streamHost, 9999);
+                setStatus('Fetching media playlist...', 'active');
+                const qRes = await fetch(bestQualityUrl);
+                mediaManifest = await qRes.text();
+            } else {
+                mediaManifest = masterManifest;
+            }
+        } else {
+            mediaManifest = signedUrl;
+            const firstSegMatch = mediaManifest.match(/https?:\/\/[^\r\n]+/);
+            if (firstSegMatch) {
+                bestQualityUrl = firstSegMatch[0];
+                const streamHost = new URL(bestQualityUrl).hostname;
+                await updateHostDnr(streamHost, 9999);
+            }
         }
-        if (bestUri) {
-            const tempUrl = new URL(bestUri, signedUrl);
-            const origUrl = new URL(signedUrl);
-            origUrl.searchParams.forEach((value, key) => {
-                tempUrl.searchParams.set(key, value);
-            });
-            bestQualityUrl = tempUrl.href;
+    } else {
+        // Revive dead Northflank/code.run / subodhpgcollege domains back to live streamvideo server
+        signedUrl = signedUrl.replace(/https?:\/\/[^\/]*(code\.run|subodhpgcollege\.site)/gi, 'https://streamvideo.co.in');
+
+        // If a segment or key was intercepted on an HLS path, restore it back to main.m3u8
+        if (signedUrl.includes('/hls/') && !signedUrl.includes('main.m3u8')) {
+            signedUrl = signedUrl.replace(/\/hls\/.*/i, '/hls/720/main.m3u8');
+        } else if (signedUrl.includes('streamvideo.co.in/stream/') && !signedUrl.includes('main.m3u8')) {
+            signedUrl = signedUrl.replace(/(https:\/\/[^/]+\/stream\/[^/]+).*/i, '$1/hls/720/main.m3u8');
         }
-    }
-    
-    setStatus('Fetching media playlist...', 'active');
-    const qRes = await fetch(bestQualityUrl);
-    const mediaManifest = await qRes.text();
-    if (!qRes.ok) {
-        throw new Error(`Media playlist HTTP ${qRes.status} (${qRes.statusText}): ${mediaManifest.substring(0, 150)}`);
+
+        // Intelligently convert direct DASH links back into the Master Playlist
+        signedUrl = signedUrl.replace(/\/dash\/.*$/i, '/master.m3u8');
+
+        // Ensure we use HLS for native processing
+        signedUrl = signedUrl.replace('.mpd', '.m3u8');
+
+        const streamHost = new URL(signedUrl).hostname;
+        await updateHostDnr(streamHost, 9999);
+        
+        setStatus('Parsing master playlist...', 'active');
+        
+        // Step 4.2: Fetch Master M3U8
+        const mRes = await fetch(signedUrl);
+        masterManifest = await mRes.text();
+        if (!mRes.ok) {
+            throw new Error(`Master playlist HTTP ${mRes.status} (${mRes.statusText}): ${masterManifest.substring(0, 150)}`);
+        }
+        
+        bestQualityUrl = signedUrl;
+        
+        if (masterManifest.includes('#EXT-X-STREAM-INF')) {
+            const lines = masterManifest.split('\n');
+            let maxBandwidth = 0;
+            let bestUri = '';
+            for (let j = 0; j < lines.length; j++) {
+                if (lines[j].startsWith('#EXT-X-STREAM-INF')) {
+                    const bwMatch = lines[j].match(/BANDWIDTH=(\d+)/);
+                    if (bwMatch) {
+                        const bw = parseInt(bwMatch[1]);
+                        if (bw > maxBandwidth) {
+                            maxBandwidth = bw;
+                            bestUri = lines[j+1].trim();
+                        }
+                    }
+                }
+            }
+            if (bestUri) {
+                const tempUrl = new URL(bestUri, signedUrl);
+                const origUrl = new URL(signedUrl);
+                origUrl.searchParams.forEach((value, key) => {
+                    tempUrl.searchParams.set(key, value);
+                });
+                bestQualityUrl = tempUrl.href;
+            }
+        }
+        
+        setStatus('Fetching media playlist...', 'active');
+        const qRes = await fetch(bestQualityUrl);
+        mediaManifest = await qRes.text();
+        if (!qRes.ok) {
+            throw new Error(`Media playlist HTTP ${qRes.status} (${qRes.statusText}): ${mediaManifest.substring(0, 150)}`);
+        }
     }
     
     const lines = mediaManifest.split('\n');
@@ -1384,17 +1447,26 @@ async function downloadVideo(vid, index) {
             mediaSequence = parseInt(lines[j].split(':')[1]);
         } else if (lines[j].startsWith('#EXTINF:')) {
             const rawSeg = lines[j+1].trim();
-            const segUrl = new URL(rawSeg, bestQualityUrl);
-            const origBest = new URL(bestQualityUrl);
-            // ONLY copy searchParams if segUrl does not already have its own signature/policy
-            origBest.searchParams.forEach((v, k) => {
-                if (!segUrl.searchParams.has(k)) {
-                    segUrl.searchParams.set(k, v);
+            let segUrl = null;
+            if (rawSeg.startsWith('http')) {
+                segUrl = new URL(rawSeg);
+            } else if (bestQualityUrl) {
+                segUrl = new URL(rawSeg, bestQualityUrl);
+            }
+            if (segUrl) {
+                if (bestQualityUrl && bestQualityUrl.startsWith('http')) {
+                    const origBest = new URL(bestQualityUrl);
+                    // ONLY copy searchParams if segUrl does not already have its own signature/policy
+                    origBest.searchParams.forEach((v, k) => {
+                        if (!segUrl.searchParams.has(k)) {
+                            segUrl.searchParams.set(k, v);
+                        }
+                    });
                 }
-            });
-            let finalSegUrl = segUrl.href;
-            finalSegUrl = finalSegUrl.replace(/https?:\/\/[^\/]*(code\.run|subodhpgcollege\.site)/gi, 'https://streamvideo.co.in');
-            segments.push(finalSegUrl);
+                let finalSegUrl = segUrl.href;
+                finalSegUrl = finalSegUrl.replace(/https?:\/\/[^\/]*(code\.run|subodhpgcollege\.site)/gi, 'https://streamvideo.co.in');
+                segments.push(finalSegUrl);
+            }
         }
     }
     
@@ -1405,25 +1477,9 @@ async function downloadVideo(vid, index) {
     // Ensure DNR rule covers the segment host as well if it differs from streamHost
     try {
         const segHost = new URL(segments[0]).hostname;
-        if (segHost && segHost !== streamHost && chrome.declarativeNetRequest && chrome.declarativeNetRequest.updateDynamicRules) {
-            await chrome.declarativeNetRequest.updateDynamicRules({
-                removeRuleIds: [9998],
-                addRules: [{
-                    id: 9998,
-                    priority: 100,
-                    action: {
-                        type: "modifyHeaders",
-                        requestHeaders: [
-                            { header: "Referer", operation: "set", value: targetReferer },
-                            { header: "Origin", operation: "set", value: targetOrigin }
-                        ]
-                    },
-                    condition: {
-                        urlFilter: `||${segHost}`,
-                        resourceTypes: ["xmlhttprequest", "media", "other"]
-                    }
-                }]
-            });
+        const streamHost = (bestQualityUrl && bestQualityUrl.startsWith('http')) ? new URL(bestQualityUrl).hostname : '';
+        if (segHost && segHost !== streamHost) {
+            await updateHostDnr(segHost, 9998);
         }
     } catch(e) {}
 
@@ -1476,8 +1532,7 @@ async function downloadVideo(vid, index) {
     const fileHandle = await dirHandle.getFileHandle(finalFilename, { create: true });
     const writable = await fileHandle.createWritable();
     
-    const isCdn = bestQualityUrl.includes('testwave.cc') || bestQualityUrl.includes('bunny-cdn') || bestQualityUrl.includes('cloudfront.net');
-    const CONCURRENCY = isCdn ? 6 : 25; // 6 parallel streams for CDN avoids 403 rate limits
+    const CONCURRENCY = 6; // 6 parallel streams avoids Cloudflare & CDN 403 rate limits
     const downloadedMap = new Map();
     let nextWriteIndex = 0;
     let nextDownloadIndex = 0;
@@ -1589,12 +1644,11 @@ async function downloadVideo(vid, index) {
                 lastSpeedCalcBytes = totalBytesDownloaded;
             }
 
-            if (completedCount % 5 === 0 || completedCount === segments.length) {
-                const pct = Math.round((completedCount / segments.length) * 100);
-                const mbDownloaded = (totalBytesDownloaded / (1024 * 1024)).toFixed(1);
-                updateProgress(pct, `${completedCount}/${segments.length} segs • ${mbDownloaded} MB @ ${currentSpeedMBs} MB/s`);
-                statusEl.textContent = `Downloading... ${pct}% (${completedCount}/${segments.length})`;
-            }
+            const pct = Math.round((completedCount / segments.length) * 100);
+            const mbDownloaded = (totalBytesDownloaded / (1024 * 1024)).toFixed(1);
+            const estTotalMB = ((totalBytesDownloaded / completedCount) * segments.length / (1024 * 1024)).toFixed(0);
+            updateProgress(pct, `${mbDownloaded} MB / ~${estTotalMB} MB • ${currentSpeedMBs} MB/s (Part ${completedCount}/${segments.length})`);
+            statusEl.textContent = `Downloading video... ${pct}% (${mbDownloaded} MB of ~${estTotalMB} MB)`;
         }
     };
 
@@ -1621,7 +1675,8 @@ async function downloadVideo(vid, index) {
         setTimeout(() => URL.revokeObjectURL(url), 15000);
     }
     
-    setStatus('Saved Successfully!', 'success');
+    setStatus('Saved Successfully! (Full Lecture)', 'success');
+    logTerminal(`🎉 [${title}] Full lecture saved successfully (${(totalBytesDownloaded / (1024 * 1024)).toFixed(1)} MB)!`, 'ok');
     
   } catch (err) {
     setStatus(`Error: ${err.message}`, 'error');

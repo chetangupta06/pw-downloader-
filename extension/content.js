@@ -9,7 +9,8 @@
     /master\.mpd(\?|$)/i,
     /\/hls\/\d+\/main\.m3u8/i,
     /\/dash\//i,
-    /(subodhpgcollege|code\.run|streamthorr|streamvideo\.co\.in|testwave\.cc|bunny-cdn)/i,
+    /(subodhpgcollege|code\.run|streamthorr|streamvideo\.co\.in)/i,
+    /(testwave\.cc|bunny-cdn).*(\.m3u8|\.mpd|\/hls\/|\/dash\/)/i,
     /cors\.pwjarvis\.com/i,
     /\/video\/[a-f0-9]+\/\d+p\/video\.mp4/i,
   ];
@@ -18,6 +19,9 @@
     if (!url || typeof url !== 'string') return;
     if (/\.(ts|m4s|aac|key|vtt|srt|jpg|jpeg|png|webp|svg|ico|css|woff2?|js|json)(\?|$)/i.test(url)) return;
     if (url.includes('/enc.key') || url.includes('/get-hls-key')) return;
+    // Ignore segment chunks disguised as PDF on testwave / bunny-cdn
+    if ((url.includes('testwave.cc') || url.includes('bunny-cdn')) && url.includes('.pdf')) return;
+
     if (PW_PATTERNS.some((p) => p.test(url))) {
       chrome.runtime.sendMessage({ type: 'SET_URL', url }, () => {
         // Ignore errors (e.g., background not ready)
@@ -29,6 +33,14 @@
   // --- Hook window messages from inject.js (MAIN world) ---
   window.addEventListener('message', (event) => {
     if (event.source !== window) return;
+    if (event.data && event.data.type === 'PW_PLAYLIST_DETECTED' && event.data.playlist) {
+      chrome.runtime.sendMessage({ 
+        type: 'SET_PLAYLIST', 
+        playlist: event.data.playlist, 
+        blobUrl: event.data.blobUrl, 
+        title: event.data.title || document.title 
+      });
+    }
     if (event.data && event.data.type === 'PW_URL_DETECTED' && event.data.url) {
       checkAndReport(event.data.url);
     }
@@ -40,11 +52,12 @@
     if (obj instanceof Blob) {
       if (obj.type.includes('mpegurl') || obj.type.includes('dash') || obj.type.includes('video') || obj.type.includes('octet-stream')) {
         obj.text().then(text => {
-          if (text && text.startsWith('#EXTM3U')) {
-            const matches = text.match(/https?:\/\/[^\r\n]+/g);
-            if (matches && matches.length > 0) {
-              checkAndReport(matches[0]);
-            }
+          if (text && text.includes('#EXTM3U')) {
+            chrome.runtime.sendMessage({
+              type: 'SET_PLAYLIST',
+              playlist: text,
+              title: document.title
+            });
           }
         }).catch(() => {});
       }
@@ -64,11 +77,10 @@
         const clonedResponse = response.clone();
         
         clonedResponse.text().then(text => {
-            if (typeof text === 'string' && text.startsWith('#EXTM3U')) {
-                if (!url.includes('enc.key') && (text.includes('#EXT-X-STREAM-INF') || text.includes('#EXTINF:'))) {
-                    chrome.runtime.sendMessage({ type: 'SET_URL', url: response.url || url }, () => {
-                        if (chrome.runtime.lastError) {}
-                    });
+            if (typeof text === 'string' && text.includes('#EXTM3U')) {
+                if (!url.includes('enc.key')) {
+                    chrome.runtime.sendMessage({ type: 'SET_PLAYLIST', playlist: text, title: document.title });
+                    chrome.runtime.sendMessage({ type: 'SET_URL', url: response.url || url });
                 }
             }
         }).catch(() => {});
@@ -89,17 +101,10 @@
         try {
             const responseText = this.responseText;
             // If the response is an HLS playlist (even if the URL is completely obfuscated)
-            if (typeof responseText === 'string' && responseText.startsWith('#EXTM3U')) {
-                // Ensure we don't accidentally intercept small media playlists if we already got a master
-                if (!url.includes('enc.key') && responseText.includes('#EXT-X-STREAM-INF')) {
-                    chrome.runtime.sendMessage({ type: 'SET_URL', url: this.responseURL || url }, () => {
-                        if (chrome.runtime.lastError) {}
-                    });
-                } else if (!url.includes('enc.key') && responseText.includes('#EXTINF:')) {
-                    // Fallback for direct media playlists without a master
-                    chrome.runtime.sendMessage({ type: 'SET_URL', url: this.responseURL || url }, () => {
-                        if (chrome.runtime.lastError) {}
-                    });
+            if (typeof responseText === 'string' && responseText.includes('#EXTM3U')) {
+                if (!url.includes('enc.key')) {
+                    chrome.runtime.sendMessage({ type: 'SET_PLAYLIST', playlist: responseText, title: document.title });
+                    chrome.runtime.sendMessage({ type: 'SET_URL', url: this.responseURL || url });
                 }
             }
         } catch(e) {
