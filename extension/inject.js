@@ -25,7 +25,7 @@
   ];
 
 
-function checkAndReport(text) {
+function checkAndReport(text, sourceUrl) {
   if (!text || typeof text !== 'string') return;
   if (text.startsWith('blob:')) return; // Ignore blob wrappers
   if (/\.(ts|m4s|aac|key|vtt|srt|jpg|jpeg|png|webp|svg|ico|css|woff2?|js|json)(\?|$)/i.test(text)) return;
@@ -35,7 +35,7 @@ function checkAndReport(text) {
   
   // If the text itself is an in-memory M3U8 playlist
   if (text.includes('#EXTM3U')) {
-    window.postMessage({ type: 'PW_PLAYLIST_DETECTED', playlist: text, title: document.title }, '*');
+    window.postMessage({ type: 'PW_PLAYLIST_DETECTED', playlist: text, url: sourceUrl || null, title: document.title }, '*');
     return;
   }
 
@@ -65,14 +65,14 @@ function checkAndReport(text) {
 const originalFetch = window.fetch;
 window.fetch = function (...args) {
   const url = typeof args[0] === 'string' ? args[0] : args[0]?.url;
-  checkAndReport(url);
+  checkAndReport(url, url);
   return originalFetch.apply(this, args);
 };
 
 // --- Patch XMLHttpRequest ---
 const originalOpen = XMLHttpRequest.prototype.open;
 XMLHttpRequest.prototype.open = function (method, url, ...rest) {
-  checkAndReport(url);
+  checkAndReport(url, url);
   return originalOpen.apply(this, [method, url, ...rest]);
 };
 

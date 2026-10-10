@@ -37,6 +37,7 @@
       chrome.runtime.sendMessage({ 
         type: 'SET_PLAYLIST', 
         playlist: event.data.playlist, 
+        url: event.data.url || null,
         blobUrl: event.data.blobUrl, 
         title: event.data.title || document.title 
       });

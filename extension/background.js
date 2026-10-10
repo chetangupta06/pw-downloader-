@@ -146,7 +146,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === 'SET_PLAYLIST') {
     const tabId = sender.tab?.id || -1;
-    const entry = { playlist: message.playlist, title: message.title || 'PW_Lecture', timestamp: Date.now() };
+    const entry = { 
+      playlist: message.playlist, 
+      url: message.url || null, 
+      title: message.title || 'PW_Lecture', 
+      timestamp: Date.now() 
+    };
     detectedPlaylists[tabId] = entry;
     latestDetectedPlaylist = entry;
     if (tabId > 0) {
@@ -171,7 +176,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
       }
     }
-    sendResponse({ playlist: data ? data.playlist : null, title: data ? data.title : null });
+    sendResponse({ 
+      playlist: data ? data.playlist : null, 
+      url: data ? data.url : null, 
+      title: data ? data.title : null 
+    });
   }
 
   return true; // Keep the message channel open for async

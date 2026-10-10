@@ -1081,6 +1081,7 @@ async function downloadVideo(vid, index) {
     // Content.js automatically handles auto-clicking and muted play on the background tab
 
     let signedUrl = null;
+    let capturedUrl = null;
     let attempts = 0;
     
     // Poll background script for URL or captured playlist (up to 35 seconds)
@@ -1097,6 +1098,7 @@ async function downloadVideo(vid, index) {
             }, r));
             if (plResp && plResp.playlist) {
                 signedUrl = plResp.playlist;
+                capturedUrl = plResp.url || null;
                 break;
             }
 
@@ -1109,6 +1111,7 @@ async function downloadVideo(vid, index) {
             }, r));
             if (resp && resp.url) {
                 signedUrl = resp.url;
+                capturedUrl = resp.url;
                 break;
             }
         } catch(e) {}
@@ -1124,14 +1127,25 @@ async function downloadVideo(vid, index) {
         throw new Error(signedUrl || 'Extraction timed out or returned null.');
     }
 
-    logTerminal(`[${title}] Intercepted stream: ${signedUrl}`, 'ok');
+    let displayStreamInfo = signedUrl.length > 120 ? signedUrl.substring(0, 120) + '...' : signedUrl;
+    if (signedUrl.includes('#EXTM3U')) {
+        displayStreamInfo = 'Full M3U8 Playlist (in-memory)';
+    }
+    logTerminal(`[${title}] Intercepted stream: ${displayStreamInfo}`, 'ok');
 
 
     // DIRECT MP4 STREAMING ENGINE (PW Jarvis, testwave.cc disguised video, & direct mp4 files)
+    const isManifest = signedUrl.includes('#EXTM3U') || 
+                       signedUrl.includes('#EXT-X-STREAM-INF') || 
+                       signedUrl.includes('#EXT-X-TARGETDURATION') || 
+                       signedUrl.includes('#EXTINF:');
+
     const isTestwave = signedUrl.includes('testwave.cc') || signedUrl.includes('bunny-cdn');
-    const isDirectMp4 = (signedUrl.includes('cors.pwjarvis.com') && signedUrl.includes('.mp4')) || 
-                        (signedUrl.includes('.mp4') && !signedUrl.includes('.m3u8') && !signedUrl.includes('.ts')) ||
-                        (isTestwave && signedUrl.includes('.pdf'));
+    const isDirectMp4 = !isManifest && (
+        (signedUrl.includes('cors.pwjarvis.com') && signedUrl.includes('.mp4')) || 
+        (signedUrl.includes('.mp4') && !signedUrl.includes('.m3u8') && !signedUrl.includes('.ts')) ||
+        (isTestwave && signedUrl.includes('.pdf') && !signedUrl.includes('.m3u8'))
+    );
 
     if (isDirectMp4) {
         setStatus('Connecting to video stream...', 'active');
@@ -1295,113 +1309,203 @@ async function downloadVideo(vid, index) {
         return;
     }
 
-    // Bypass proxy servers (like testwave.cc) and fetch directly from CloudFront to avoid Origin blocks
-    signedUrl = signedUrl.replace(/^https?:\/\/[^\/]+\/play\/(d1d34p8vz63oiq\.cloudfront\.net.*)/i, 'https://$1');
-    
+    // Safe URL parsing helpers
+    const safeUrl = (url, base) => {
+        if (!url || typeof url !== 'string') return null;
+        try {
+            const trimmed = url.trim();
+            if (base && typeof base === 'string') {
+                const trimmedBase = base.trim();
+                if (trimmedBase.startsWith('http://') || trimmedBase.startsWith('https://')) {
+                    return new URL(trimmed, trimmedBase);
+                }
+            }
+            if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+                return new URL(trimmed);
+            }
+            return null;
+        } catch(e) {
+            return null;
+        }
+    };
+
+    const safeHostname = (url) => {
+        const u = safeUrl(url);
+        return u ? u.hostname : '';
+    };
+
+    // Determine a reliable fallback base URL if relative paths are present
+    let fallbackBaseUrl = '';
+    if (capturedUrl && capturedUrl.startsWith('http')) {
+        fallbackBaseUrl = capturedUrl;
+    } else if (vid.videoDetails && vid.videoDetails.videoUrl && vid.videoDetails.videoUrl.startsWith('http')) {
+        fallbackBaseUrl = vid.videoDetails.videoUrl;
+    } else if (vid.url && vid.url.startsWith('http')) {
+        fallbackBaseUrl = vid.url;
+    } else if (vid.homeworkIds && vid.homeworkIds.length > 0 && vid.homeworkIds[0].videoUrl && vid.homeworkIds[0].videoUrl.startsWith('http')) {
+        fallbackBaseUrl = vid.homeworkIds[0].videoUrl;
+    }
+
+    if (fallbackBaseUrl) {
+        fallbackBaseUrl = fallbackBaseUrl.replace(/\.mpd(\?|$)/i, '.m3u8$1').replace(/\/dash\/.*$/i, '/master.m3u8');
+    }
+
+    const trimmedInput = (signedUrl || '').trim().replace(/^\uFEFF/, '');
+    const isStreamManifest = isManifest || 
+                             trimmedInput.includes('#EXTM3U') || 
+                             trimmedInput.includes('#EXT-X-STREAM-INF') || 
+                             trimmedInput.includes('#EXT-X-TARGETDURATION') || 
+                             trimmedInput.includes('#EXTINF:');
+
     let masterManifest = '';
     let mediaManifest = '';
     let bestQualityUrl = '';
+    const targetQuality = document.getElementById('select-quality')?.value || 'highest';
 
-    if (signedUrl.startsWith('#EXTM3U')) {
-        logTerminal(`[${title}] Parsing captured full stream manifest...`, 'ok');
-        if (signedUrl.includes('#EXT-X-STREAM-INF')) {
-            masterManifest = signedUrl;
-            const lines = masterManifest.split('\n');
-            let maxBandwidth = 0;
-            let bestUri = '';
-            for (let j = 0; j < lines.length; j++) {
-                if (lines[j].startsWith('#EXT-X-STREAM-INF')) {
-                    const bwMatch = lines[j].match(/BANDWIDTH=(\d+)/);
-                    if (bwMatch) {
-                        const bw = parseInt(bwMatch[1]);
-                        if (bw > maxBandwidth) {
-                            maxBandwidth = bw;
-                            bestUri = lines[j+1].trim();
+    if (isStreamManifest) {
+        logTerminal(`[${title}] Parsing captured stream manifest...`, 'ok');
+        if (trimmedInput.includes('#EXT-X-STREAM-INF')) {
+            masterManifest = trimmedInput;
+            bestQualityUrl = fallbackBaseUrl || '';
+        } else {
+            mediaManifest = trimmedInput;
+        }
+    } else {
+        let masterUrl = signedUrl.trim();
+        // Bypass proxy servers (like testwave.cc) and fetch directly from CloudFront to avoid Origin blocks
+        masterUrl = masterUrl.replace(/^https?:\/\/[^\/]+\/play\/(d1d34p8vz63oiq\.cloudfront\.net.*)/i, 'https://$1');
+        // Revive dead Northflank/code.run / subodhpgcollege domains back to live streamvideo server
+        masterUrl = masterUrl.replace(/https?:\/\/[^\/]*(code\.run|subodhpgcollege\.site)/gi, 'https://streamvideo.co.in');
+
+        // Intelligently convert direct DASH links back into Master Playlist
+        masterUrl = masterUrl.replace(/\/dash\/.*$/i, '/master.m3u8');
+        masterUrl = masterUrl.replace(/\.mpd(\?|$)/i, '.m3u8$1');
+
+        // If on /hls/ path, check if 1080p is available when highest quality or 1080 is requested
+        if (masterUrl.includes('/hls/')) {
+            if (!masterUrl.includes('main.m3u8')) {
+                masterUrl = masterUrl.replace(/\/hls\/.*/i, '/hls/720/main.m3u8');
+            }
+            if (targetQuality === 'highest' || targetQuality === '1080') {
+                const probe1080 = masterUrl.replace(/\/hls\/\d+\/main\.m3u8/i, '/hls/1080/main.m3u8');
+                if (probe1080 !== masterUrl) {
+                    try {
+                        const probeRes = await fetch(probe1080, { method: 'HEAD', signal: AbortSignal.timeout(1800) });
+                        if (probeRes.ok) {
+                            masterUrl = probe1080;
+                            logTerminal(`1080p Full HD stream found on server!`, 'ok');
                         }
+                    } catch(e) {}
+                }
+            }
+        } else if (masterUrl.includes('streamvideo.co.in/stream/') && !masterUrl.includes('main.m3u8')) {
+            masterUrl = masterUrl.replace(/(https:\/\/[^/]+\/stream\/[^/]+).*/i, '$1/hls/720/main.m3u8');
+        }
+
+        const streamHost = safeHostname(masterUrl);
+        if (streamHost) {
+            await updateHostDnr(streamHost, 9999);
+        }
+
+        setStatus('Parsing master playlist...', 'active');
+        const mRes = await fetch(masterUrl);
+        if (!mRes.ok) {
+            throw new Error(`Master playlist HTTP ${mRes.status} (${mRes.statusText})`);
+        }
+        masterManifest = await mRes.text();
+        bestQualityUrl = masterUrl;
+    }
+
+    // Step 4.2: Extract Best Quality Media Playlist from Master Manifest
+    if (masterManifest && masterManifest.includes('#EXT-X-STREAM-INF')) {
+        const mLines = masterManifest.split('\n');
+        const variants = [];
+        for (let j = 0; j < mLines.length; j++) {
+            const line = mLines[j].trim();
+            if (line.startsWith('#EXT-X-STREAM-INF')) {
+                let uri = '';
+                for (let k = j + 1; k < mLines.length; k++) {
+                    const nextLine = mLines[k].trim();
+                    if (nextLine && !nextLine.startsWith('#')) {
+                        uri = nextLine;
+                        break;
+                    }
+                }
+                if (uri) {
+                    const bwMatch = line.match(/BANDWIDTH=(\d+)/i);
+                    const resMatch = line.match(/RESOLUTION=(\d+)x(\d+)/i);
+                    const height = resMatch ? parseInt(resMatch[2]) : 0;
+                    const width = resMatch ? parseInt(resMatch[1]) : 0;
+                    const bandwidth = bwMatch ? parseInt(bwMatch[1]) : 0;
+                    variants.push({ line, uri, height, width, bandwidth });
+                }
+            }
+        }
+
+        if (variants.length > 0) {
+            // Sort variants: Highest resolution first (e.g. 1080 > 720 > 480), then highest bandwidth
+            variants.sort((a, b) => {
+                if (b.height !== a.height) return b.height - a.height;
+                return b.bandwidth - a.bandwidth;
+            });
+
+            let chosenVariant = variants[0]; // Default: Highest quality
+            if (targetQuality !== 'highest') {
+                const targetH = parseInt(targetQuality);
+                const match = variants.find(v => v.height === targetH);
+                if (match) chosenVariant = match;
+            }
+
+            const chosenQualityText = chosenVariant.height ? `${chosenVariant.height}p` : 'Best';
+            const kbps = chosenVariant.bandwidth ? ` (${Math.round(chosenVariant.bandwidth / 1000)} kbps)` : '';
+            logTerminal(`Selected quality: ${chosenQualityText}${kbps}`, 'ok');
+
+            let chosenUri = chosenVariant.uri;
+            if (chosenUri.startsWith('http://') || chosenUri.startsWith('https://')) {
+                bestQualityUrl = chosenUri;
+            } else {
+                const baseUrl = (bestQualityUrl && bestQualityUrl.startsWith('http')) ? bestQualityUrl : fallbackBaseUrl;
+                if (baseUrl) {
+                    const resolved = safeUrl(chosenUri, baseUrl);
+                    if (resolved) {
+                        const baseObj = safeUrl(baseUrl);
+                        if (baseObj) {
+                            baseObj.searchParams.forEach((v, k) => {
+                                if (!resolved.searchParams.has(k)) resolved.searchParams.set(k, v);
+                            });
+                        }
+                        bestQualityUrl = resolved.href;
                     }
                 }
             }
-            if (bestUri.startsWith('http')) {
-                bestQualityUrl = bestUri;
-                const streamHost = new URL(bestQualityUrl).hostname;
-                await updateHostDnr(streamHost, 9999);
-                setStatus('Fetching media playlist...', 'active');
+
+            if (bestQualityUrl && (bestQualityUrl.startsWith('http://') || bestQualityUrl.startsWith('https://'))) {
+                const streamHost = safeHostname(bestQualityUrl);
+                if (streamHost) await updateHostDnr(streamHost, 9999);
+                setStatus(`Fetching media playlist (${chosenQualityText})...`, 'active');
                 const qRes = await fetch(bestQualityUrl);
+                if (!qRes.ok) throw new Error(`Media playlist HTTP ${qRes.status} (${qRes.statusText})`);
                 mediaManifest = await qRes.text();
             } else {
                 mediaManifest = masterManifest;
             }
         } else {
-            mediaManifest = signedUrl;
-            const firstSegMatch = mediaManifest.match(/https?:\/\/[^\r\n]+/);
-            if (firstSegMatch) {
-                bestQualityUrl = firstSegMatch[0];
-                const streamHost = new URL(bestQualityUrl).hostname;
-                await updateHostDnr(streamHost, 9999);
-            }
+            mediaManifest = masterManifest;
         }
-    } else {
-        // Revive dead Northflank/code.run / subodhpgcollege domains back to live streamvideo server
-        signedUrl = signedUrl.replace(/https?:\/\/[^\/]*(code\.run|subodhpgcollege\.site)/gi, 'https://streamvideo.co.in');
+    }
 
-        // If a segment or key was intercepted on an HLS path, restore it back to main.m3u8
-        if (signedUrl.includes('/hls/') && !signedUrl.includes('main.m3u8')) {
-            signedUrl = signedUrl.replace(/\/hls\/.*/i, '/hls/720/main.m3u8');
-        } else if (signedUrl.includes('streamvideo.co.in/stream/') && !signedUrl.includes('main.m3u8')) {
-            signedUrl = signedUrl.replace(/(https:\/\/[^/]+\/stream\/[^/]+).*/i, '$1/hls/720/main.m3u8');
-        }
+    if (!mediaManifest && isManifest) {
+        mediaManifest = trimmedInput;
+    }
 
-        // Intelligently convert direct DASH links back into the Master Playlist
-        signedUrl = signedUrl.replace(/\/dash\/.*$/i, '/master.m3u8');
-
-        // Ensure we use HLS for native processing
-        signedUrl = signedUrl.replace('.mpd', '.m3u8');
-
-        const streamHost = new URL(signedUrl).hostname;
-        await updateHostDnr(streamHost, 9999);
-        
-        setStatus('Parsing master playlist...', 'active');
-        
-        // Step 4.2: Fetch Master M3U8
-        const mRes = await fetch(signedUrl);
-        masterManifest = await mRes.text();
-        if (!mRes.ok) {
-            throw new Error(`Master playlist HTTP ${mRes.status} (${mRes.statusText}): ${masterManifest.substring(0, 150)}`);
-        }
-        
-        bestQualityUrl = signedUrl;
-        
-        if (masterManifest.includes('#EXT-X-STREAM-INF')) {
-            const lines = masterManifest.split('\n');
-            let maxBandwidth = 0;
-            let bestUri = '';
-            for (let j = 0; j < lines.length; j++) {
-                if (lines[j].startsWith('#EXT-X-STREAM-INF')) {
-                    const bwMatch = lines[j].match(/BANDWIDTH=(\d+)/);
-                    if (bwMatch) {
-                        const bw = parseInt(bwMatch[1]);
-                        if (bw > maxBandwidth) {
-                            maxBandwidth = bw;
-                            bestUri = lines[j+1].trim();
-                        }
-                    }
-                }
-            }
-            if (bestUri) {
-                const tempUrl = new URL(bestUri, signedUrl);
-                const origUrl = new URL(signedUrl);
-                origUrl.searchParams.forEach((value, key) => {
-                    tempUrl.searchParams.set(key, value);
-                });
-                bestQualityUrl = tempUrl.href;
-            }
-        }
-        
-        setStatus('Fetching media playlist...', 'active');
-        const qRes = await fetch(bestQualityUrl);
-        mediaManifest = await qRes.text();
-        if (!qRes.ok) {
-            throw new Error(`Media playlist HTTP ${qRes.status} (${qRes.statusText}): ${mediaManifest.substring(0, 150)}`);
+    if (!bestQualityUrl || !bestQualityUrl.startsWith('http')) {
+        const firstUrlMatch = mediaManifest.match(/https?:\/\/[^\r\n"'\s]+/);
+        if (firstUrlMatch) {
+            bestQualityUrl = firstUrlMatch[0];
+            const streamHost = safeHostname(bestQualityUrl);
+            if (streamHost) await updateHostDnr(streamHost, 9999);
+        } else if (fallbackBaseUrl) {
+            bestQualityUrl = fallbackBaseUrl;
         }
     }
     
@@ -1414,70 +1518,91 @@ async function downloadVideo(vid, index) {
     let mediaSequence = 0;
     
     for (let j = 0; j < lines.length; j++) {
-        if (lines[j].startsWith('#EXT-X-KEY:METHOD=AES-128')) {
-            const uriMatch = lines[j].match(/URI="([^"]+)"/);
+        const line = lines[j].trim();
+        if (line.includes('#EXT-X-KEY:') && line.includes('METHOD=AES-128')) {
+            const uriMatch = line.match(/URI="([^"]+)"/);
             if (uriMatch) {
-                const tempAes = new URL(uriMatch[1], bestQualityUrl);
-                const origBest = new URL(bestQualityUrl);
-                origBest.searchParams.forEach((v, k) => tempAes.searchParams.set(k, v));
-                let finalAesUrl = tempAes.href;
-                finalAesUrl = finalAesUrl.replace(/https?:\/\/[^\/]*(code\.run|subodhpgcollege\.site)/gi, 'https://streamvideo.co.in');
-                aesKeyUrl = finalAesUrl;
-                aesKeyFallbackUrl = finalAesUrl;
+                const rawKeyUri = uriMatch[1];
+                let keyUrl = rawKeyUri;
+                if (!keyUrl.startsWith('http://') && !keyUrl.startsWith('https://')) {
+                    const baseObj = safeUrl(bestQualityUrl) || safeUrl(fallbackBaseUrl);
+                    if (baseObj) {
+                        const resolvedKey = safeUrl(rawKeyUri, baseObj.href);
+                        if (resolvedKey) {
+                            baseObj.searchParams.forEach((v, k) => {
+                                if (!resolvedKey.searchParams.has(k)) resolvedKey.searchParams.set(k, v);
+                            });
+                            keyUrl = resolvedKey.href;
+                        }
+                    }
+                }
+                keyUrl = keyUrl.replace(/https?:\/\/[^\/]*(code\.run|subodhpgcollege\.site)/gi, 'https://streamvideo.co.in');
+                aesKeyUrl = keyUrl;
+                aesKeyFallbackUrl = keyUrl;
                 
                 // If stream server hosts enc.key at /hls/enc.key (e.g. streamvideo.co.in, PW Thor proxies, etc.)
-                if (bestQualityUrl.includes("/hls/")) {
-                    const keyUrlObj = new URL(bestQualityUrl);
-                    keyUrlObj.pathname = keyUrlObj.pathname.replace(/\/hls\/[^/]+\/[^/]+$/, '/hls/enc.key');
-                    const proxyKeyUrl = keyUrlObj.href;
+                if (bestQualityUrl && bestQualityUrl.includes("/hls/")) {
+                    const keyUrlObj = safeUrl(bestQualityUrl);
+                    if (keyUrlObj) {
+                        keyUrlObj.pathname = keyUrlObj.pathname.replace(/\/hls\/[^/]+\/[^/]+$/, '/hls/enc.key');
+                        const proxyKeyUrl = keyUrlObj.href;
 
-                    if (uriMatch[1] === "enc.key" || bestQualityUrl.includes("streamvideo") || bestQualityUrl.includes("subodhpgcollege") || bestQualityUrl.includes("streamthorr") || bestQualityUrl.includes("code.run")) {
-                        aesKeyUrl = proxyKeyUrl;
-                        aesKeyFallbackUrl = finalAesUrl;
-                    } else {
-                        aesKeyFallbackUrl = proxyKeyUrl;
+                        if (rawKeyUri === "enc.key" || bestQualityUrl.includes("streamvideo") || bestQualityUrl.includes("subodhpgcollege") || bestQualityUrl.includes("streamthorr") || bestQualityUrl.includes("code.run")) {
+                            aesKeyUrl = proxyKeyUrl;
+                            aesKeyFallbackUrl = keyUrl;
+                        } else {
+                            aesKeyFallbackUrl = proxyKeyUrl;
+                        }
                     }
                 }
             }
-            const ivMatch = lines[j].match(/IV=0x([0-9a-fA-F]{32})/);
+            const ivMatch = line.match(/IV=0x([0-9a-fA-F]{32})/);
             if (ivMatch) {
                 explicitIv = new Uint8Array(ivMatch[1].match(/.{1,2}/g).map(byte => parseInt(byte, 16))).buffer;
             }
-        } else if (lines[j].startsWith('#EXT-X-MEDIA-SEQUENCE:')) {
-            mediaSequence = parseInt(lines[j].split(':')[1]);
-        } else if (lines[j].startsWith('#EXTINF:')) {
-            const rawSeg = lines[j+1].trim();
-            let segUrl = null;
-            if (rawSeg.startsWith('http')) {
-                segUrl = new URL(rawSeg);
-            } else if (bestQualityUrl) {
-                segUrl = new URL(rawSeg, bestQualityUrl);
-            }
-            if (segUrl) {
-                if (bestQualityUrl && bestQualityUrl.startsWith('http')) {
-                    const origBest = new URL(bestQualityUrl);
-                    // ONLY copy searchParams if segUrl does not already have its own signature/policy
-                    origBest.searchParams.forEach((v, k) => {
-                        if (!segUrl.searchParams.has(k)) {
-                            segUrl.searchParams.set(k, v);
-                        }
-                    });
+        } else if (line.startsWith('#EXT-X-MEDIA-SEQUENCE:')) {
+            mediaSequence = parseInt(line.split(':')[1]) || 0;
+        } else if (line.startsWith('#EXTINF:')) {
+            let rawSeg = '';
+            for (let k = j + 1; k < lines.length; k++) {
+                const nextLine = lines[k].trim();
+                if (nextLine && !nextLine.startsWith('#')) {
+                    rawSeg = nextLine;
+                    break;
                 }
-                let finalSegUrl = segUrl.href;
-                finalSegUrl = finalSegUrl.replace(/https?:\/\/[^\/]*(code\.run|subodhpgcollege\.site)/gi, 'https://streamvideo.co.in');
-                segments.push(finalSegUrl);
+            }
+            if (rawSeg) {
+                let finalSegUrl = '';
+                if (rawSeg.startsWith('http://') || rawSeg.startsWith('https://')) {
+                    finalSegUrl = rawSeg;
+                } else {
+                    const baseObj = safeUrl(bestQualityUrl) || safeUrl(fallbackBaseUrl);
+                    if (baseObj) {
+                        const resolvedSeg = safeUrl(rawSeg, baseObj.href);
+                        if (resolvedSeg) {
+                            baseObj.searchParams.forEach((v, k) => {
+                                if (!resolvedSeg.searchParams.has(k)) resolvedSeg.searchParams.set(k, v);
+                            });
+                            finalSegUrl = resolvedSeg.href;
+                        }
+                    }
+                }
+                if (finalSegUrl) {
+                    finalSegUrl = finalSegUrl.replace(/https?:\/\/[^\/]*(code\.run|subodhpgcollege\.site)/gi, 'https://streamvideo.co.in');
+                    segments.push(finalSegUrl);
+                }
             }
         }
     }
     
     if (segments.length === 0) {
-        throw new Error("No segments found. Content: " + mediaManifest.substring(0, 300));
+        throw new Error("No segments found in playlist. Manifest preview: " + mediaManifest.substring(0, 300));
     }
 
     // Ensure DNR rule covers the segment host as well if it differs from streamHost
     try {
-        const segHost = new URL(segments[0]).hostname;
-        const streamHost = (bestQualityUrl && bestQualityUrl.startsWith('http')) ? new URL(bestQualityUrl).hostname : '';
+        const segHost = safeHostname(segments[0]);
+        const streamHost = safeHostname(bestQualityUrl);
         if (segHost && segHost !== streamHost) {
             await updateHostDnr(segHost, 9998);
         }
