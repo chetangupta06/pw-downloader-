@@ -104,6 +104,52 @@ Object.defineProperty(window, 'CryptoJS', {
     configurable: true
 });
 
+// --- Hook URL.createObjectURL (catches full M3U8 blob playlists) ---
+const _origCreateObjectURL = URL.createObjectURL;
+URL.createObjectURL = function(obj) {
+  const resultUrl = _origCreateObjectURL.apply(this, arguments);
+  if (obj instanceof Blob) {
+    obj.text().then(text => {
+      if (typeof text === 'string' && text.includes('#EXTM3U')) {
+        console.log('[PW Downloader] Intercepted full M3U8 blob playlist!');
+        window.postMessage({ type: 'PW_PLAYLIST_DETECTED', playlist: text, blobUrl: resultUrl, title: document.title }, '*');
+      }
+    }).catch(() => {});
+  }
+  return resultUrl;
+};
+
+// --- Hook Shaka Player manifest loading ---
+function hookShaka(shakaObj) {
+  if (!shakaObj || !shakaObj.Player || shakaObj.Player.prototype.load._pwHooked) return;
+  const origLoad = shakaObj.Player.prototype.load;
+  shakaObj.Player.prototype.load = function(assetUri, ...rest) {
+    if (typeof assetUri === 'string' && assetUri.startsWith('blob:')) {
+      fetch(assetUri).then(r => r.text()).then(text => {
+        if (text && text.includes('#EXTM3U')) {
+          console.log('[PW Downloader] Intercepted M3U8 from Shaka Player load!');
+          window.postMessage({ type: 'PW_PLAYLIST_DETECTED', playlist: text, blobUrl: assetUri, title: document.title }, '*');
+        }
+      }).catch(() => {});
+    }
+    return origLoad.call(this, assetUri, ...rest);
+  };
+  shakaObj.Player.prototype.load._pwHooked = true;
+}
+
+if (window.shaka) hookShaka(window.shaka);
+let _shaka = window.shaka;
+try {
+  Object.defineProperty(window, 'shaka', {
+    get: function() { return _shaka; },
+    set: function(val) {
+      _shaka = val;
+      hookShaka(_shaka);
+    },
+    configurable: true
+  });
+} catch(e) {}
+
 // --- Scan DOM periodically ---
 setInterval(() => {
   document.querySelectorAll('video[src], source[src]').forEach((el) => checkAndReport(el.src));
@@ -113,3 +159,4 @@ setInterval(() => {
   });
 }, 2000);
 })();
+

@@ -14,6 +14,9 @@ const PW_URL_PATTERNS = [
 // Store detected URLs per tab: { tabId -> { url, timestamp } }
 const detectedUrls = {};
 let latestDetectedUrl = null;
+const detectedPlaylists = {};
+let latestDetectedPlaylist = null;
+
 
 function recordUrl(tabId, url) {
   // Ignore non-video assets, segments, keys, subtitles
@@ -122,8 +125,27 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ success: true });
   }
 
+  if (message.type === 'SET_PLAYLIST') {
+    const tabId = sender.tab?.id || -1;
+    const entry = { playlist: message.playlist, title: message.title || 'PW_Lecture', timestamp: Date.now() };
+    detectedPlaylists[tabId] = entry;
+    latestDetectedPlaylist = entry;
+    if (tabId > 0) {
+      chrome.action.setBadgeText({ text: 'FULL', tabId });
+      chrome.action.setBadgeBackgroundColor({ color: '#10b981', tabId });
+    }
+    sendResponse({ success: true });
+  }
+
+  if (message.type === 'GET_PLAYLIST') {
+    const tabId = message.tabId;
+    let data = detectedPlaylists[tabId] || latestDetectedPlaylist;
+    sendResponse({ playlist: data ? data.playlist : null, title: data ? data.title : null });
+  }
+
   return true; // Keep the message channel open for async
 });
+
 
 // Clean up when a tab is closed
 chrome.tabs.onRemoved.addListener((tabId) => {

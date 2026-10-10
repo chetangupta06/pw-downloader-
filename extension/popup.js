@@ -38,23 +38,36 @@ function qualityLabel(q) {
   return 'Auto';
 }
 
-// --- Init: ask background for the current tab's detected URL ---
+// --- Init: ask background for the current tab's detected URL or full playlist ---
 async function init() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab) return;
 
-  chrome.runtime.sendMessage({ type: 'GET_URL', tabId: tab.id }, (resp) => {
-    if (resp && resp.url) {
-      detectedUrl = resp.url;
-      detectedTitle = resp.title || 'PW_Lecture';
-      document.getElementById('url-display').textContent = resp.url;
+  chrome.runtime.sendMessage({ type: 'GET_PLAYLIST', tabId: tab.id }, (respPL) => {
+    if (respPL && respPL.playlist) {
+      window.detectedPlaylist = respPL.playlist;
+      detectedUrl = 'Captured Full Lecture Playlist (All Segments)';
+      detectedTitle = respPL.title || tab.title || 'PW_Lecture';
+      document.getElementById('url-display').textContent = detectedUrl;
       document.getElementById('lecture-title-input').value = detectedTitle;
       showState('state-detected');
-    } else {
-      showState('state-waiting');
+      return;
     }
+
+    chrome.runtime.sendMessage({ type: 'GET_URL', tabId: tab.id }, (resp) => {
+      if (resp && resp.url) {
+        detectedUrl = resp.url;
+        detectedTitle = resp.title || 'PW_Lecture';
+        document.getElementById('url-display').textContent = resp.url;
+        document.getElementById('lecture-title-input').value = detectedTitle;
+        showState('state-detected');
+      } else {
+        showState('state-waiting');
+      }
+    });
   });
 }
+
 
 // --- Fetch quality options from HF backend ---
 async function fetchQualities() {
