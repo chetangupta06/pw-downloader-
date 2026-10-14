@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "PW Lecture Downloader",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Automatically detect PW lecture videos on any platform and download them in your desired quality.",
   "permissions": [
     "declarativeNetRequest",
@@ -46,7 +46,8 @@
         "*://*.streamvideo.co.in/*"
       ],
       "js": ["content.js"],
-      "run_at": "document_start"
+      "run_at": "document_start",
+      "all_frames": true
     },
     {
       "matches": [
@@ -62,7 +63,8 @@
       ],
       "js": ["inject.js"],
       "world": "MAIN",
-      "run_at": "document_start"
+      "run_at": "document_start",
+      "all_frames": true
     }
   ],
   "icons": {

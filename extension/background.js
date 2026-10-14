@@ -2,9 +2,9 @@
 // This script silently monitors all network requests for PW video URLs.
 
 const PW_URL_PATTERNS = [
-  /master\.m3u8(\?|$)/i,
-  /master\.mpd(\?|$)/i,
+  /master\.(m3u8|mpd)(\?|$)/i,
   /\/hls\/\d+\/main\.m3u8/i,
+  /\/hls\/main\.m3u8/i,
   /\/dash\//i,
   /(subodhpgcollege|code\.run|streamthorr|streamvideo\.co\.in)/i,
   /(testwave\.cc|bunny-cdn).*(\.m3u8|\.mpd|\/hls\/|\/dash\/)/i,
@@ -18,35 +18,29 @@ let latestDetectedUrl = null;
 const detectedPlaylists = {};
 let latestDetectedPlaylist = null;
 
+function isStreamUrl(url) {
+  if (!url || typeof url !== 'string') return false;
+  if (url.startsWith('blob:')) return false;
+  if (/\.(ts|m4s|aac|key|vtt|srt|jpg|jpeg|png|webp|svg|ico|css|woff2?|js|json)(\?|$)/i.test(url)) return false;
+  if (url.includes('/enc.key') || url.includes('/get-hls-key')) return false;
+  if ((url.includes('testwave.cc') || url.includes('bunny-cdn')) && url.includes('.pdf')) return false;
+
+  if (/\.(m3u8|mpd)(\?|$)/i.test(url)) return true;
+  if (/\/hls\/|\/dash\//i.test(url)) return true;
+  if (/\/stream\//i.test(url)) return true;
+  if (/(subodhpgcollege|code\.run|streamthorr|pwthor|streamvideo\.co\.in|cors\.pwjarvis\.com)/i.test(url)) return true;
+  if (/\/video\/[a-f0-9]+\/\d+p\/video\.mp4/i.test(url)) return true;
+  if (/(Policy=|Signature=)/i.test(url) && (url.includes('.m3u8') || url.includes('.mpd') || url.includes('/hls/'))) return true;
+  return PW_URL_PATTERNS.some(p => p.test(url));
+}
 
 function recordUrl(tabId, url) {
-  // Ignore non-video assets, segments, keys, subtitles
-  if (/\.(ts|m4s|aac|key|vtt|srt|jpg|jpeg|png|webp|svg|ico|css|woff2?|js|json)(\?|$)/i.test(url)) return;
-  if (url.includes('/enc.key') || url.includes('/get-hls-key')) return;
-  // Ignore segment chunks disguised as PDF on testwave / bunny-cdn
-  if ((url.includes('testwave.cc') || url.includes('bunny-cdn')) && url.includes('.pdf')) return;
-
-  const isMasterUrl =
-    url.includes('master.m3u8') ||
-    url.includes('master.mpd') ||
-    url.includes('/dash/') ||
-    url.includes('/main.m3u8') ||
-    url.includes('/video.mp4') ||
-    url.includes('streamvideo.co.in/stream/') ||
-    url.includes('subodhpgcollege') ||
-    url.includes('code.run') ||
-    url.includes('streamthorr') ||
-    ((url.includes('testwave.cc') || url.includes('bunny-cdn')) && (url.includes('.m3u8') || url.includes('.mpd') || url.includes('/hls/') || url.includes('/dash/'))) ||
-    (url.includes('cors.pwjarvis.com') && url.includes('.mp4')) ||
-    /\/hls\/\d+\/main\.m3u8/.test(url);
-
-  if (!isMasterUrl) return;
+  if (!isStreamUrl(url)) return;
 
   let finalUrl = url;
   if (!url.includes('cors.pwjarvis.com') && !url.includes('.mp4') && !url.includes('testwave.cc') && !url.includes('bunny-cdn')) {
     finalUrl = finalUrl.replace(/\.mpd(\?|$)/gi, '.m3u8$1');
     finalUrl = finalUrl.replace(/\/dash\/.*$/i, '/master.m3u8');
-    finalUrl = finalUrl.replace(/\/hls\/\d+\/main\.m3u8/i, '/hls/720/main.m3u8');
   }
 
   // If on streamvideo.co.in or Thor stream server, ensure it resolves to /hls/720/main.m3u8
@@ -74,10 +68,8 @@ function recordUrl(tabId, url) {
 
 chrome.webRequest.onBeforeRequest.addListener(
   (details) => {
-    const url = details.url;
-    const isVideoUrl = PW_URL_PATTERNS.some((pattern) => pattern.test(url));
-    if (isVideoUrl) {
-      recordUrl(details.tabId, url);
+    if (isStreamUrl(details.url)) {
+      recordUrl(details.tabId, details.url);
     }
   },
   { urls: ['<all_urls>'] },
@@ -104,6 +96,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const tabId = message.tabId;
     const since = message.since || 0;
     let data = (tabId && tabId > 0) ? detectedUrls[tabId] : null;
+    if (data && since > 0 && data.timestamp < since) {
+      data = null;
+    }
     if (!data && latestDetectedUrl && latestDetectedUrl.timestamp >= since) {
       data = latestDetectedUrl;
     }
@@ -117,7 +112,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     sendResponse({ url: data ? data.url : null, title: data ? data.title : null });
   }
-
 
   if (message.type === 'CLEAR_URL') {
     const tabId = message.tabId;
@@ -144,21 +138,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ success: true });
   }
 
-function isValidM3U8(text) {
-  if (!text || typeof text !== 'string') return false;
-  const trimmed = text.trim().replace(/^\uFEFF/, '');
-  if (!trimmed.startsWith('#EXTM3U')) return false;
-  if (trimmed.includes('function(') || 
-      trimmed.includes('var ') || 
-      trimmed.includes('const ') || 
-      trimmed.includes('let ') || 
-      trimmed.includes('module.exports') || 
-      trimmed.includes('define.amd') || 
-      trimmed.includes('exports=')) {
-    return false;
+  function isValidM3U8(text) {
+    if (!text || typeof text !== 'string') return false;
+    const trimmed = text.trim().replace(/^\uFEFF/, '');
+    if (!trimmed.startsWith('#EXTM3U')) return false;
+    if (trimmed.includes('function(') || 
+        trimmed.includes('var ') || 
+        trimmed.includes('const ') || 
+        trimmed.includes('let ') || 
+        trimmed.includes('module.exports') || 
+        trimmed.includes('define.amd') || 
+        trimmed.includes('exports=')) {
+      return false;
+    }
+    return trimmed.includes('#EXTINF:') || trimmed.includes('#EXT-X-STREAM-INF') || trimmed.includes('#EXT-X-TARGETDURATION');
   }
-  return trimmed.includes('#EXTINF:') || trimmed.includes('#EXT-X-STREAM-INF') || trimmed.includes('#EXT-X-TARGETDURATION');
-}
 
   if (message.type === 'SET_PLAYLIST') {
     if (!isValidM3U8(message.playlist)) {
@@ -185,6 +179,9 @@ function isValidM3U8(text) {
     const tabId = message.tabId;
     const since = message.since || 0;
     let data = (tabId && tabId > 0) ? detectedPlaylists[tabId] : null;
+    if (data && since > 0 && data.timestamp < since) {
+      data = null;
+    }
     if (!data && latestDetectedPlaylist && latestDetectedPlaylist.timestamp >= since) {
       data = latestDetectedPlaylist;
     }
@@ -199,6 +196,7 @@ function isValidM3U8(text) {
     sendResponse({ 
       playlist: data ? data.playlist : null, 
       url: data ? data.url : null, 
+      blobUrl: data ? data.blobUrl : null, 
       title: data ? data.title : null 
     });
   }

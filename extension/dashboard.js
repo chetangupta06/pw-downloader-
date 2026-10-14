@@ -1022,7 +1022,7 @@ async function downloadVideo(vid, index) {
     setStatus('Extracting Signed URL (Network Intercept)...', 'active');
     
     const api = getApiConfig();
-    const startTime = Date.now() - 500; // Allow 500ms grace period
+    const startTime = Date.now() - 15000; // Allow 15s grace period
     
     let watchUrl = '';
     if (api.type === 'pwjarvis') {
@@ -1098,25 +1098,12 @@ async function downloadVideo(vid, index) {
     // Always clear old state before starting extraction of a new video
     await new Promise(r => chrome.runtime.sendMessage({ type: 'CLEAR_URL', tabId: -1 }, r));
 
-    // Create an off-screen popup window so the player's visibility checks pass without stealing focus
+    // Create an inactive background tab so the player executes scripts without being throttled
     let tab = null;
-    let winId = null;
     try {
-        const win = await chrome.windows.create({ 
-            url: watchUrl, 
-            type: 'popup', 
-            state: 'minimized',
-            populate: true
-        });
-        winId = win.id;
-        tab = (win.tabs && win.tabs.length > 0) ? win.tabs[0] : null;
-        if (!tab) {
-            const tabs = await chrome.tabs.query({ windowId: win.id });
-            tab = tabs[0];
-        }
-    } catch (e) {
-        // Fallback for Android browsers like Kiwi or Lemur which do not support multiple windows
         tab = await chrome.tabs.create({ url: watchUrl, active: false });
+    } catch (e) {
+        console.error('Failed to create background tab:', e);
     }
 
     // Content.js automatically handles auto-clicking and muted play on the background tab
@@ -1125,13 +1112,13 @@ async function downloadVideo(vid, index) {
     let capturedUrl = null;
     let attempts = 0;
     
-    // Poll background script for URL or captured playlist (up to 35 seconds)
-    while (!signedUrl && attempts < 350) {
+    // Poll background script for URL or captured playlist (up to 40 seconds)
+    while (!signedUrl && attempts < 400) {
         await new Promise(r => setTimeout(r, 100)); // 100ms
         attempts++;
         
         try {
-            // 1. Check for full captured playlist first (with strict timestamp check)
+            // 1. Check for full captured playlist first
             const plResp = await new Promise(r => chrome.runtime.sendMessage({ 
                 type: 'GET_PLAYLIST', 
                 tabId: tab ? tab.id : -1,
@@ -1142,7 +1129,6 @@ async function downloadVideo(vid, index) {
                 capturedUrl = plResp.url || null;
                 break;
             }
-
 
             // 2. Check for intercepted video URL
             const resp = await new Promise(r => chrome.runtime.sendMessage({ 
@@ -1158,10 +1144,9 @@ async function downloadVideo(vid, index) {
         } catch(e) {}
     }
     
-    // Clean up off-screen window or tab
+    // Clean up background tab
     try {
-        if (winId) chrome.windows.remove(winId);
-        else if (tab && tab.id) chrome.tabs.remove(tab.id);
+        if (tab && tab.id) chrome.tabs.remove(tab.id);
     } catch(e) {}
     
     if (!signedUrl || typeof signedUrl !== 'string' || signedUrl.startsWith("ERR:")) {
