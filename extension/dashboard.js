@@ -1095,59 +1095,85 @@ async function downloadVideo(vid, index) {
         }
     }
 
-    // Always clear old state before starting extraction of a new video
-    await new Promise(r => chrome.runtime.sendMessage({ type: 'CLEAR_URL', tabId: -1 }, r));
-
-    // Create an inactive background tab so the player executes scripts without being throttled
-    let tab = null;
-    try {
-        tab = await chrome.tabs.create({ url: watchUrl, active: false });
-    } catch (e) {
-        console.error('Failed to create background tab:', e);
-    }
-
-    // Content.js automatically handles auto-clicking and muted play on the background tab
-
     let signedUrl = null;
     let capturedUrl = null;
-    let attempts = 0;
-    
-    // Poll background script for URL or captured playlist (up to 40 seconds)
-    while (!signedUrl && attempts < 400) {
-        await new Promise(r => setTimeout(r, 100)); // 100ms
-        attempts++;
-        
-        try {
-            // 1. Check for full captured playlist first
-            const plResp = await new Promise(r => chrome.runtime.sendMessage({ 
-                type: 'GET_PLAYLIST', 
-                tabId: tab ? tab.id : -1,
-                since: startTime 
-            }, r));
-            if (plResp && plResp.playlist && isValidM3U8(plResp.playlist)) {
-                signedUrl = plResp.playlist;
-                capturedUrl = plResp.url || null;
-                break;
-            }
 
-            // 2. Check for intercepted video URL
-            const resp = await new Promise(r => chrome.runtime.sendMessage({ 
-                type: 'GET_URL', 
-                tabId: tab ? tab.id : -1, 
-                since: startTime 
-            }, r));
-            if (resp && resp.url && resp.url.startsWith('http')) {
-                signedUrl = resp.url;
-                capturedUrl = resp.url;
-                break;
+    // Check if any currently open tab is already viewing or playing this video
+    try {
+        const tabs = await chrome.tabs.query({});
+        for (const t of tabs) {
+            if (!t.url) continue;
+            const matchesTab = (actualVideoId && t.url.includes(actualVideoId)) ||
+                               (t.url.includes('vidcloud.eu.org') && t.url.includes(encodeURIComponent(title))) ||
+                               (vid.videoDetails && vid.videoDetails.id && t.url.includes(vid.videoDetails.id));
+            if (matchesTab) {
+                const urlResp = await new Promise(r => chrome.runtime.sendMessage({ type: 'GET_URL', tabId: t.id }, r));
+                if (urlResp && urlResp.url && urlResp.url.startsWith('http')) {
+                    logTerminal(`[${title}] Detected active stream from open tab!`, 'ok');
+                    signedUrl = urlResp.url;
+                    capturedUrl = urlResp.url;
+                    break;
+                }
+                const plResp = await new Promise(r => chrome.runtime.sendMessage({ type: 'GET_PLAYLIST', tabId: t.id }, r));
+                if (plResp && plResp.playlist && isValidM3U8(plResp.playlist)) {
+                    logTerminal(`[${title}] Detected active playlist from open tab!`, 'ok');
+                    signedUrl = plResp.playlist;
+                    capturedUrl = plResp.url || null;
+                    break;
+                }
             }
+        }
+    } catch(e) {}
+
+    let tab = null;
+    if (!signedUrl) {
+        // Create an inactive background tab so the player executes scripts
+        try {
+            tab = await chrome.tabs.create({ url: watchUrl, active: false });
+        } catch (e) {
+            console.error('Failed to create background tab:', e);
+        }
+
+        // Content.js automatically handles auto-clicking and muted play on the background tab
+        let attempts = 0;
+        
+        // Poll background script for URL or captured playlist (up to 45 seconds)
+        while (!signedUrl && attempts < 450) {
+            await new Promise(r => setTimeout(r, 100)); // 100ms
+            attempts++;
+            
+            try {
+                // 1. Check for full captured playlist first
+                const plResp = await new Promise(r => chrome.runtime.sendMessage({ 
+                    type: 'GET_PLAYLIST', 
+                    tabId: tab ? tab.id : -1,
+                    since: startTime 
+                }, r));
+                if (plResp && plResp.playlist && isValidM3U8(plResp.playlist)) {
+                    signedUrl = plResp.playlist;
+                    capturedUrl = plResp.url || null;
+                    break;
+                }
+
+                // 2. Check for intercepted video URL
+                const resp = await new Promise(r => chrome.runtime.sendMessage({ 
+                    type: 'GET_URL', 
+                    tabId: tab ? tab.id : -1, 
+                    since: startTime 
+                }, r));
+                if (resp && resp.url && resp.url.startsWith('http')) {
+                    signedUrl = resp.url;
+                    capturedUrl = resp.url;
+                    break;
+                }
+            } catch(e) {}
+        }
+        
+        // Clean up background tab
+        try {
+            if (tab && tab.id) chrome.tabs.remove(tab.id);
         } catch(e) {}
     }
-    
-    // Clean up background tab
-    try {
-        if (tab && tab.id) chrome.tabs.remove(tab.id);
-    } catch(e) {}
     
     if (!signedUrl || typeof signedUrl !== 'string' || signedUrl.startsWith("ERR:")) {
         throw new Error(signedUrl || 'Extraction timed out or returned null.');

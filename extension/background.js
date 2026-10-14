@@ -96,15 +96,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const tabId = message.tabId;
     const since = message.since || 0;
     let data = (tabId && tabId > 0) ? detectedUrls[tabId] : null;
-    if (data && since > 0 && data.timestamp < since) {
-      data = null;
-    }
-    if (!data && latestDetectedUrl && latestDetectedUrl.timestamp >= since) {
-      data = latestDetectedUrl;
+    if (!data && latestDetectedUrl) {
+      if (since === 0 || latestDetectedUrl.timestamp >= since) {
+        data = latestDetectedUrl;
+      }
     }
     if (!data) {
       for (const id in detectedUrls) {
-        if (detectedUrls[id] && detectedUrls[id].timestamp >= since) {
+        if (detectedUrls[id] && (since === 0 || detectedUrls[id].timestamp >= since)) {
           data = detectedUrls[id];
           break;
         }
@@ -179,15 +178,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const tabId = message.tabId;
     const since = message.since || 0;
     let data = (tabId && tabId > 0) ? detectedPlaylists[tabId] : null;
-    if (data && since > 0 && data.timestamp < since) {
-      data = null;
-    }
-    if (!data && latestDetectedPlaylist && latestDetectedPlaylist.timestamp >= since) {
-      data = latestDetectedPlaylist;
+    if (!data && latestDetectedPlaylist) {
+      if (since === 0 || latestDetectedPlaylist.timestamp >= since) {
+        data = latestDetectedPlaylist;
+      }
     }
     if (!data) {
       for (const id in detectedPlaylists) {
-        if (detectedPlaylists[id] && detectedPlaylists[id].timestamp >= since) {
+        if (detectedPlaylists[id] && (since === 0 || detectedPlaylists[id].timestamp >= since)) {
           data = detectedPlaylists[id];
           break;
         }

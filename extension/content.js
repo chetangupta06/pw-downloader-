@@ -161,9 +161,20 @@
 
   // --- Auto clicker for Android/Windows popup and video autoplay ---
   function initAutoClicker() {
-    const allowedDomains = ['vidcloud.eu.org', 'rarestudy.in', 'samfygros.com', 'pwthor.live', 'pwjarvis.com', 'streamvideo.co.in'];
-    if (!allowedDomains.some(d => window.location.hostname.includes(d))) return;
-    
+    const playSelectors = [
+      '#playBtn',
+      '#mobileCenterBtn',
+      '#retryBtn',
+      '.shaka-play-button',
+      '.vjs-big-play-button',
+      '.vjs-play-control',
+      'button[aria-label*="Play" i]',
+      'button[id*="play" i]',
+      'button[class*="play" i]',
+      '.play-btn',
+      '.btn-play'
+    ].join(', ');
+
     const clickerInterval = setInterval(() => {
       // 1. Click Android / Windows button
       const elements = document.querySelectorAll('span, div, button, p, h1, h2, h3, h4');
@@ -185,17 +196,18 @@
         });
         try {
           v.muted = true;
-          v.play();
+          const p = v.play();
+          if (p && p.catch) p.catch(() => {});
         } catch (e) {}
       });
 
-      // 3. Click play buttons
-      document.querySelectorAll('.shaka-play-button, .vjs-big-play-button, button[aria-label="Play"]').forEach((btn) => {
+      // 3. Click play buttons across all players (Vidcloud, Shaka, Video.js, etc.)
+      document.querySelectorAll(playSelectors).forEach((btn) => {
         try {
           btn.click();
         } catch (e) {}
       });
-    }, 200);
+    }, 150);
 
     setTimeout(() => clearInterval(clickerInterval), 25000);
   }

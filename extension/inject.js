@@ -86,25 +86,29 @@
   // --- 1. Patch fetch ---
   const originalFetch = window.fetch;
   window.fetch = function (...args) {
-    const url = typeof args[0] === 'string' ? args[0] : args[0]?.url;
-    if (url) checkAndReport(url, url);
+    try {
+      const urlStr = typeof args[0] === 'string' ? args[0] : (args[0]?.url || args[0]?.href || String(args[0] || ''));
+      if (urlStr) checkAndReport(urlStr, urlStr);
+    } catch(e) {}
     return originalFetch.apply(this, args);
   };
 
   // --- 2. Patch XMLHttpRequest ---
   const originalOpen = XMLHttpRequest.prototype.open;
   XMLHttpRequest.prototype.open = function (method, url, ...rest) {
-    if (url) checkAndReport(url, url);
+    try {
+      const urlStr = typeof url === 'string' ? url : (url?.href || String(url || ''));
+      if (urlStr) checkAndReport(urlStr, urlStr);
+    } catch(e) {}
     return originalOpen.apply(this, [method, url, ...rest]);
   };
 
   // --- 3. Hook CryptoJS (Defeat vidcloud.eu.org AES encryption) ---
-  let _CryptoJS = window.CryptoJS;
   function hookDecrypt(cryptoObj) {
     if (!cryptoObj || !cryptoObj.AES || cryptoObj.AES.decrypt._pwHooked) return;
     const origDecrypt = cryptoObj.AES.decrypt;
-    cryptoObj.AES.decrypt = function() {
-      const result = origDecrypt.apply(this, arguments);
+    cryptoObj.AES.decrypt = function(...args) {
+      const result = origDecrypt.apply(this, args);
       try {
         const decryptedStr = result.toString(cryptoObj.enc.Utf8);
         if (decryptedStr) {
@@ -116,7 +120,8 @@
     cryptoObj.AES.decrypt._pwHooked = true;
   }
 
-  if (_CryptoJS) hookDecrypt(_CryptoJS);
+  if (window.CryptoJS) hookDecrypt(window.CryptoJS);
+  let _CryptoJS = window.CryptoJS;
   try {
     Object.defineProperty(window, 'CryptoJS', {
       get: function() { return _CryptoJS; },
@@ -138,6 +143,8 @@
         if (isValidM3U8(text)) {
           console.log('[PW Downloader] Intercepted full M3U8 blob playlist!');
           window.postMessage({ type: 'PW_PLAYLIST_DETECTED', playlist: text, blobUrl: resultUrl, title: document.title }, '*');
+        } else if (typeof text === 'string') {
+          checkAndReport(text);
         }
       }).catch(() => {});
     }
@@ -155,6 +162,8 @@
             if (isValidM3U8(text)) {
               console.log('[PW Downloader] Intercepted M3U8 from Shaka Player load!');
               window.postMessage({ type: 'PW_PLAYLIST_DETECTED', playlist: text, blobUrl: assetUri, title: document.title }, '*');
+            } else {
+              checkAndReport(text);
             }
           }).catch(() => {});
         } else {
@@ -164,6 +173,26 @@
       return origLoad.call(this, assetUri, ...rest);
     };
     shakaObj.Player.prototype.load._pwHooked = true;
+
+    // Also wrap Player constructor for instance-level safety
+    if (!shakaObj.Player._pwHookedConstructor) {
+      const origPlayerCons = shakaObj.Player;
+      const wrappedPlayer = function(...args) {
+        const inst = new origPlayerCons(...args);
+        const origInstLoad = inst.load;
+        inst.load = function(assetUri, ...rest) {
+          if (typeof assetUri === 'string') {
+            checkAndReport(assetUri);
+          }
+          return origInstLoad.call(this, assetUri, ...rest);
+        };
+        return inst;
+      };
+      wrappedPlayer.prototype = origPlayerCons.prototype;
+      wrappedPlayer.isBrowserSupported = origPlayerCons.isBrowserSupported;
+      wrappedPlayer._pwHookedConstructor = true;
+      shakaObj.Player = wrappedPlayer;
+    }
   }
 
   if (window.shaka) hookShaka(window.shaka);
@@ -229,16 +258,31 @@
     };
   } catch(e) {}
 
-  // --- 8. Periodic DOM scanning ---
+  // --- 8. Periodic Scanner & Guard ---
   setInterval(() => {
+    if (window.shaka) hookShaka(window.shaka);
+    if (window.Hls) hookHls(window.Hls);
+    if (window.CryptoJS) hookDecrypt(window.CryptoJS);
+
     document.querySelectorAll('video, source').forEach((el) => {
       if (el.src) checkAndReport(el.src);
       if (el.currentSrc) checkAndReport(el.currentSrc);
     });
-    document.querySelectorAll('input[type="hidden"]').forEach((el) => {
-      if (el.value && (el.value.includes('.m3u8') || el.value.includes('.mpd'))) {
+    document.querySelectorAll('input[type="hidden"], input').forEach((el) => {
+      if (el.value && (el.value.includes('.m3u8') || el.value.includes('.mpd') || el.value.includes('/hls/'))) {
         checkAndReport(el.value);
       }
     });
-  }, 500);
+
+    // Check location query params for direct stream URLs
+    if (window.location && window.location.search) {
+      const match = window.location.search.match(/video_url=([^&]+)/i);
+      if (match) {
+        try {
+          const decoded = decodeURIComponent(match[1]);
+          checkAndReport(decoded);
+        } catch(e) {}
+      }
+    }
+  }, 300);
 })();

@@ -35,15 +35,7 @@
   "content_scripts": [
     {
       "matches": [
-        "*://*.pw.live/*",
-        "*://*.penpencil.co/*",
-        "*://*.classplusapp.com/*",
-        "*://*.vidcloud.eu.org/*",
-        "*://*.rarestudy.in/*",
-        "*://*.samfygros.com/*",
-        "*://*.pwthor.live/*",
-        "*://*.pwjarvis.com/*",
-        "*://*.streamvideo.co.in/*"
+        "<all_urls>"
       ],
       "js": ["content.js"],
       "run_at": "document_start",
@@ -51,15 +43,7 @@
     },
     {
       "matches": [
-        "*://*.pw.live/*",
-        "*://*.penpencil.co/*",
-        "*://*.classplusapp.com/*",
-        "*://*.vidcloud.eu.org/*",
-        "*://*.rarestudy.in/*",
-        "*://*.samfygros.com/*",
-        "*://*.pwthor.live/*",
-        "*://*.pwjarvis.com/*",
-        "*://*.streamvideo.co.in/*"
+        "<all_urls>"
       ],
       "js": ["inject.js"],
       "world": "MAIN",
